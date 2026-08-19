@@ -117,3 +117,42 @@ target_link_libraries(cimbarpunk_session PUBLIC
     Qt6::Gui
 )
 target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_session)
+
+add_library(cimbarpunk_tray STATIC
+    tray/TrayController.cpp
+    tray/TrayController.h
+)
+target_include_directories(cimbarpunk_tray PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cimbarpunk_tray PUBLIC cimbarpunk_settings Qt6::Core Qt6::Gui Qt6::Widgets)
+set_source_files_properties(${PROJECT_SOURCE_DIR}/resources/icons/tray.svg PROPERTIES
+    QT_RESOURCE_ALIAS icons/tray.svg
+)
+qt_add_resources(cimbarpunk_tray tray_icons
+    PREFIX /cimbarpunk
+    FILES ${PROJECT_SOURCE_DIR}/resources/icons/tray.svg
+)
+
+add_library(cimbarpunk_app STATIC
+    app/AppRuntime.cpp
+    app/AppRuntime.h
+)
+target_include_directories(cimbarpunk_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cimbarpunk_app PRIVATE cimbarpunk_core)
+target_link_libraries(cimbarpunk_app PUBLIC
+    cimbarpunk_capture
+    cimbarpunk_decoder
+    cimbarpunk_diagnostics
+    cimbarpunk_output
+    cimbarpunk_pipeline
+    cimbarpunk_selection
+    cimbarpunk_session
+    cimbarpunk_settings
+    cimbarpunk_tray
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+
+qt_add_executable(cimbarpunk app/main.cpp)
+target_link_libraries(cimbarpunk PRIVATE cimbarpunk_app Qt6::Core Qt6::Gui Qt6::Widgets)
+set_target_properties(cimbarpunk PROPERTIES WIN32_EXECUTABLE TRUE)
