@@ -51,12 +51,15 @@ private:
 
     friend class ::QtScreenCaptureSourceTest;
 
-    void handleFrame(const QImage& frame);
-    void handleActiveChanged(bool active);
-    void handleFailure(const QString& message);
+    void installBackendCallbacks(quint64 generation);
+    void clearBackendCallbacks();
+    void handleFrame(quint64 generation, const QImage& frame);
+    void handleActiveChanged(quint64 generation, bool active);
+    void handleFailure(quint64 generation, const QString& message);
+    void updateActive(bool active);
     void armStartupTimeout(quint64 generation);
     void cancelStartupTimeout();
-    void connectScreenSignals(QScreen* screen);
+    void connectScreenSignals(QScreen* screen, quint64 generation);
     void disconnectScreenSignals();
 
     std::unique_ptr<detail::IScreenCaptureBackend> m_backend;

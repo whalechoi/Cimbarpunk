@@ -15,6 +15,9 @@ class FakeScreenCaptureBackend final : public cimbarpunk::detail::IScreenCapture
 public:
     void setCallbacks(Callbacks newCallbacks) override {
         callbacks = std::move(newCallbacks);
+        if (callbacks.frameReady || callbacks.activeChanged || callbacks.failed) {
+            retainedCallbacks.append(callbacks);
+        }
     }
 
     void setScreen(QScreen* screen) override {
@@ -61,14 +64,20 @@ public:
         }
     }
 
-    void sendActive(const bool active) {
-        backendActive = active;
-        if (callbacks.activeChanged) {
-            callbacks.activeChanged(active);
+    void sendActiveFromAttempt(const qsizetype attempt, const bool active) {
+        if (retainedCallbacks.at(attempt).activeChanged) {
+            retainedCallbacks.at(attempt).activeChanged(active);
+        }
+    }
+
+    void sendErrorFromAttempt(const qsizetype attempt, const QString& message) {
+        if (retainedCallbacks.at(attempt).failed) {
+            retainedCallbacks.at(attempt).failed(message);
         }
     }
 
     Callbacks callbacks;
+    QList<Callbacks> retainedCallbacks;
     QStringList events;
     QScreen* selectedScreen = nullptr;
     bool emitActiveOnStart = false;
@@ -236,11 +245,11 @@ private slots:
         QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 1);
         QVERIFY(!backend->backendActive);
 
-        backend->sendActive(true);
+        backend->sendActiveFromAttempt(0, true);
         QCoreApplication::processEvents();
         QCOMPARE(failures.count(), 1);
         QCOMPARE(active.count(), 0);
-        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 2);
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 1);
         QVERIFY(!backend->backendActive);
     }
 
@@ -258,6 +267,41 @@ private slots:
         QCOMPARE(failures.count(), 0);
         QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 200);
         QCOMPARE(failures.at(0).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 2);
+    }
+
+    void staleAttemptEventsCannotAffectReentrantRestart() {
+        FakeScreenCaptureBackend* backend = nullptr;
+        auto source = createSource(backend, std::chrono::milliseconds(20));
+        bool restarted = false;
+        int restartAttempts = 0;
+        connect(source.get(), &cimbarpunk::ICaptureSource::failed, source.get(),
+            [&](const QString&) {
+                if (restartAttempts++ == 0) {
+                    restarted = source->start(testScreen(), nullptr);
+                }
+            });
+        QSignalSpy failures(source.get(), &cimbarpunk::ICaptureSource::failed);
+        QSignalSpy active(source.get(), &cimbarpunk::ICaptureSource::activeChanged);
+
+        QVERIFY(source->start(testScreen(), nullptr));
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 200);
+
+        QVERIFY(restarted);
+        QCOMPARE(failures.at(0).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
+        QCOMPARE(backend->retainedCallbacks.size(), 2);
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 1);
+
+        backend->sendActiveFromAttempt(0, true);
+        backend->sendErrorFromAttempt(0, QStringLiteral("stale A failure"));
+        QCoreApplication::processEvents();
+
+        QCOMPARE(active.count(), 0);
+        QCOMPARE(failures.count(), 1);
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 1);
+
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 2, 200);
+        QCOMPARE(failures.at(1).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
         QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 2);
     }
 
