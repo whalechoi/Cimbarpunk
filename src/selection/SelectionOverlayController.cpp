@@ -3,6 +3,7 @@
 
 #include "selection/ScreenIdentity.h"
 
+#include <QGuiApplication>
 #include <QQuickItem>
 #include <QQuickView>
 #include <QScreen>
@@ -59,13 +60,24 @@ void SelectionOverlayController::showForResolvedScreen(QScreen* screen, const QS
         return;
     }
 
+    if (QWindow* const focusWindow = QGuiApplication::focusWindow();
+        focusWindow != nullptr && focusWindow != m_view.get()) {
+        m_previousFocusWindow = focusWindow;
+    }
     m_model.endDrag();
     releaseInputGrabs();
+    const bool resettingCaptureWindow =
+        m_view->flags().testFlag(Qt::WindowTransparentForInput)
+        || m_view->flags().testFlag(Qt::WindowDoesNotAcceptFocus);
+    if (resettingCaptureWindow) {
+        m_view->hide();
+    }
     m_screenId = screenId;
     m_acceptEmitted = false;
     m_cancelEmitted = false;
     m_captureMode = false;
     m_view->setFlag(Qt::WindowTransparentForInput, false);
+    m_view->setFlag(Qt::WindowDoesNotAcceptFocus, false);
     if (QObject* root = m_view->rootObject(); root != nullptr) {
         root->setProperty("captureMode", false);
         root->setProperty("statusText", QStringLiteral("正在识别"));
@@ -96,18 +108,39 @@ void SelectionOverlayController::enterCaptureMode() {
     }
 
     m_captureMode = true;
+    m_model.endDrag();
     releaseInputGrabs();
     if (QObject* root = m_view->rootObject(); root != nullptr) {
         root->setProperty("captureMode", true);
         root->setProperty("statusText", QStringLiteral("正在识别"));
     }
+    const QRect geometry = m_view->geometry();
+    QScreen* const screen = m_view->screen();
+    m_view->hide();
     m_view->setFlag(Qt::WindowTransparentForInput, true);
+    m_view->setFlag(Qt::WindowDoesNotAcceptFocus, true);
+    m_view->setScreen(screen);
+    m_view->setGeometry(geometry);
+    if (m_previousFocusWindow != nullptr && m_previousFocusWindow->isVisible()) {
+        m_previousFocusWindow->requestActivate();
+    }
 
     if (m_model.normalizedRect() == QRectF(0, 0, 1, 1)) {
-        m_view->hide();
-    } else {
-        m_view->show();
+        return;
     }
+    QQuickView* const view = m_view.get();
+    const QPointer<QWindow> previousFocusWindow = m_previousFocusWindow;
+    QMetaObject::invokeMethod(view,
+        [view, previousFocusWindow] {
+            if (view->flags().testFlag(Qt::WindowTransparentForInput)
+                && view->flags().testFlag(Qt::WindowDoesNotAcceptFocus)) {
+                view->show();
+                if (previousFocusWindow != nullptr && previousFocusWindow->isVisible()) {
+                    previousFocusWindow->requestActivate();
+                }
+            }
+        },
+        Qt::QueuedConnection);
 }
 
 void SelectionOverlayController::setProgress(const std::optional<double> progress) {
@@ -131,6 +164,12 @@ void SelectionOverlayController::releaseInputGrabs() {
     if (QQuickItem* focusItem = m_view->activeFocusItem(); focusItem != nullptr) {
         focusItem->setFocus(false);
     }
+    if (QQuickItem* root = m_view->rootObject(); root != nullptr) {
+        root->setFocus(false);
+    }
+    if (QQuickItem* contentItem = m_view->contentItem(); contentItem != nullptr) {
+        contentItem->setFocus(false);
+    }
 }
 
 void SelectionOverlayController::hide() {
@@ -139,7 +178,7 @@ void SelectionOverlayController::hide() {
 }
 
 void SelectionOverlayController::acceptSelection() {
-    if (m_acceptEmitted || !m_view->isVisible() || !m_model.hasSelection()) {
+    if (m_acceptEmitted || m_captureMode || !m_view->isVisible() || !m_model.hasSelection()) {
         return;
     }
 

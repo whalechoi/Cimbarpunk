@@ -94,16 +94,19 @@ Item {
 
     Shortcut {
         sequence: "Return"
+        enabled: !root.captureMode
         onActivated: root.acceptRequested()
     }
 
     Shortcut {
         sequence: "Enter"
+        enabled: !root.captureMode
         onActivated: root.acceptRequested()
     }
 
     Shortcut {
         sequence: "Escape"
+        enabled: !root.captureMode
         onActivated: root.cancelRequested()
     }
 

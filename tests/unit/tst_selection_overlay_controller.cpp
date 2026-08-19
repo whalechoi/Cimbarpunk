@@ -11,6 +11,7 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QWindow>
 #include <QtTest/QTest>
 
 #include <algorithm>
@@ -350,6 +351,60 @@ private slots:
         QCOMPARE(controller.m_model.selection(), before);
     }
 
+    void captureModeRelinquishesKeyboardFocusAndTheNextShowRestoresIt() {
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        QWindow capturedApplicationWindow;
+        capturedApplicationWindow.setGeometry(20, 20, 320, 240);
+        capturedApplicationWindow.show();
+        capturedApplicationWindow.requestActivate();
+        QTRY_VERIFY(capturedApplicationWindow.isActive());
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+        QQuickItem* root = controller.m_view->rootObject();
+        QVERIFY(root != nullptr);
+        QSignalSpy accepted(&controller, &cimbarpunk::SelectionOverlayController::accepted);
+        QSignalSpy cancelled(&controller, &cimbarpunk::SelectionOverlayController::cancelled);
+        QTRY_VERIFY(controller.m_view->isActive());
+        QTRY_VERIFY(root->hasActiveFocus());
+        const QRect overlayGeometry = controller.m_view->geometry();
+
+        controller.enterCaptureMode();
+
+        QTRY_VERIFY(controller.m_view->isVisible());
+        QCOMPARE(controller.m_view->geometry(), overlayGeometry);
+        QVERIFY(controller.m_view->flags().testFlag(Qt::WindowTransparentForInput));
+        QCOMPARE(controller.m_view->activeFocusItem(), nullptr);
+        QTRY_VERIFY(!controller.m_view->isActive());
+        QTRY_VERIFY(capturedApplicationWindow.isActive());
+        QVERIFY(controller.m_view->flags().testFlag(Qt::WindowDoesNotAcceptFocus));
+        QTest::keyClick(controller.m_view.get(), Qt::Key_Escape);
+        QTest::keyClick(controller.m_view.get(), Qt::Key_Return);
+        QTest::keyClick(controller.m_view.get(), Qt::Key_Enter);
+        QVERIFY(QMetaObject::invokeMethod(root, "acceptRequested", Qt::DirectConnection));
+        QCOMPARE(accepted.count(), 0);
+        QCOMPARE(cancelled.count(), 0);
+        QVERIFY(!controller.m_view->isActive());
+        QVERIFY(capturedApplicationWindow.isActive());
+
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+
+        QVERIFY(!controller.m_view->flags().testFlag(Qt::WindowTransparentForInput));
+        QVERIFY(!controller.m_view->flags().testFlag(Qt::WindowDoesNotAcceptFocus));
+        QTRY_VERIFY(controller.m_view->isActive());
+        QTRY_VERIFY(root->hasActiveFocus());
+        QTest::keyClick(controller.m_view.get(), Qt::Key_Escape);
+        QCOMPARE(cancelled.count(), 1);
+        QCOMPARE(accepted.count(), 0);
+
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+        QTRY_VERIFY(controller.m_view->isActive());
+        QTRY_VERIFY(root->hasActiveFocus());
+        QTest::keyClick(controller.m_view.get(), Qt::Key_Enter);
+        QCOMPARE(accepted.count(), 1);
+        QCOMPARE(cancelled.count(), 1);
+    }
+
     void adjustmentToolbarUsesOnlyAFullyFittingSide_data() {
         QTest::addColumn<QRectF>("normalized");
         QTest::addColumn<QString>("side");
@@ -401,11 +456,13 @@ private slots:
 
         controller.showForScreen(screen, QRectF(0, 0, 1, 0.999));
         controller.enterCaptureMode();
-        QVERIFY(controller.m_view->isVisible());
+        QTRY_VERIFY(controller.m_view->isVisible());
 
         controller.showForScreen(screen, QRectF(0, 0, 1, 1));
         controller.enterCaptureMode();
         QVERIFY(!controller.m_view->isVisible());
+        QVERIFY(controller.m_view->flags().testFlag(Qt::WindowDoesNotAcceptFocus));
+        QCOMPARE(controller.m_view->activeFocusItem(), nullptr);
     }
 
     void captureStatusUsesOnlyAFullyFittingSide_data() {

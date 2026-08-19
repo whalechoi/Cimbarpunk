@@ -4,6 +4,7 @@
 #include "selection/SelectionModel.h"
 
 #include <QObject>
+#include <QPointer>
 #include <QRectF>
 #include <QString>
 
@@ -12,6 +13,7 @@
 
 class QQuickView;
 class QScreen;
+class QWindow;
 class SelectionOverlayControllerTest;
 
 namespace cimbarpunk {
@@ -53,6 +55,7 @@ private:
 
     SelectionModel m_model;
     std::unique_ptr<QQuickView> m_view;
+    QPointer<QWindow> m_previousFocusWindow;
     QString m_screenId;
     bool m_acceptEmitted = false;
     bool m_cancelEmitted = false;
