@@ -86,6 +86,28 @@ set_tests_properties(qt_screen_capture_source PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
+qt_add_executable(tst_selection_overlay_controller unit/tst_selection_overlay_controller.cpp)
+target_link_libraries(tst_selection_overlay_controller PRIVATE
+    cimbarpunk_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Qml
+    Qt6::Test
+)
+
+add_test(NAME selection_overlay COMMAND tst_selection_overlay_controller)
+set_tests_properties(selection_overlay PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+if(WIN32)
+    file(TO_CMAKE_PATH "$ENV{WINDIR}/Fonts" CIMBARPUNK_TEST_FONT_DIRECTORY)
+    set_property(TEST selection_overlay APPEND PROPERTY
+        ENVIRONMENT "QT_QPA_FONTDIR=${CIMBARPUNK_TEST_FONT_DIRECTORY}"
+    )
+endif()
+
 qt_add_executable(tst_decoder integration/tst_decoder.cpp)
 target_compile_definitions(tst_decoder PRIVATE CIMBARPUNK_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cimbar")
 target_include_directories(tst_decoder PRIVATE
@@ -112,7 +134,7 @@ set_tests_properties(session PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_qt_screen_capture_source tst_decoder tst_session)
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_qt_screen_capture_source tst_selection_overlay_controller tst_decoder tst_session)
 
 add_executable(generate_cimbar_fixture EXCLUDE_FROM_ALL tools/generate_cimbar_fixture.cpp)
 target_include_directories(generate_cimbar_fixture PRIVATE

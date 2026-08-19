@@ -17,9 +17,18 @@ add_library(cimbarpunk_selection STATIC
     selection/ScreenIdentity.h
     selection/SelectionModel.cpp
     selection/SelectionModel.h
+    selection/SelectionOverlayController.cpp
+    selection/SelectionOverlayController.h
 )
 target_include_directories(cimbarpunk_selection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cimbarpunk_selection PUBLIC Qt6::Core Qt6::Gui)
+target_link_libraries(cimbarpunk_selection PUBLIC Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml)
+set_source_files_properties(selection/qml/SelectionOverlay.qml PROPERTIES
+    QT_RESOURCE_ALIAS SelectionOverlay.qml
+)
+qt_add_resources(cimbarpunk_selection selection_overlay_qml
+    PREFIX /cimbarpunk/qml
+    FILES selection/qml/SelectionOverlay.qml
+)
 target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_selection)
 
 add_library(cimbarpunk_capture STATIC
