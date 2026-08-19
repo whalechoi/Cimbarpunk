@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "settings/SettingsStore.h"
 
+#include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QVariant>
@@ -76,6 +77,11 @@ std::optional<QRectF> SettingsStore::restoreSelection(const QStringView screenId
 }
 
 void SettingsStore::registerTemporaryFile(const QString& path) {
+    if (!QFileInfo(path).isAbsolute()) {
+        m_settings->sync();
+        return;
+    }
+
     QStringList paths = registeredTemporaryFiles();
     if (!paths.contains(path)) {
         paths.append(path);

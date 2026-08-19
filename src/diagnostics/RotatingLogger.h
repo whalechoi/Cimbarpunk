@@ -18,6 +18,7 @@ public:
     static constexpr int backupFileCount = 3;
 
     explicit RotatingLogger(QString directory = {}, qsizetype maximumFileBytes = defaultMaximumFileBytes);
+    RotatingLogger(QString directory, qsizetype maximumFileBytes, std::unique_ptr<QFile> file);
     ~RotatingLogger();
 
     RotatingLogger(const RotatingLogger&) = delete;

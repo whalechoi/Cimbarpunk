@@ -74,6 +74,20 @@ private slots:
         QSettings afterRemoval(settingsPath, QSettings::IniFormat);
         QCOMPARE(afterRemoval.value(QStringLiteral("output/pendingTemporaryFiles")).toStringList(), QStringList{});
     }
+
+    void rejectsRelativeTemporaryFilePaths() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString settingsPath = temporaryDirectory.filePath(QStringLiteral("settings.ini"));
+        QSettings settings(settingsPath, QSettings::IniFormat);
+        SettingsStore store(settings);
+
+        store.registerTemporaryFile(QStringLiteral("write.part"));
+
+        QCOMPARE(store.registeredTemporaryFiles(), QStringList{});
+        QSettings persistedSettings(settingsPath, QSettings::IniFormat);
+        QCOMPARE(persistedSettings.value(QStringLiteral("output/pendingTemporaryFiles")).toStringList(), QStringList{});
+    }
 };
 
 QTEST_GUILESS_MAIN(SettingsStoreTest)

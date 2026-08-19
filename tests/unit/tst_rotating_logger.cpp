@@ -6,17 +6,34 @@
 #include <QTemporaryDir>
 #include <QtTest/QTest>
 
+#include <memory>
+
 using cimbarpunk::RotatingLogger;
 
 namespace {
 
-QString readFile(const QString& path) {
+QByteArray readBytes(const QString& path) {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (!file.open(QIODevice::ReadOnly)) {
         return {};
     }
-    return QString::fromUtf8(file.readAll());
+    return file.readAll();
 }
+
+QString readFile(const QString& path) {
+    return QString::fromUtf8(readBytes(path));
+}
+
+class FailingWriteFile final : public QFile {
+public:
+    int writeAttempts = 0;
+
+protected:
+    qint64 writeData(const char*, qint64) override {
+        ++writeAttempts;
+        return -1;
+    }
+};
 
 } // namespace
 
@@ -58,6 +75,44 @@ private slots:
         QVERIFY(currentFile.size() <= 32);
     }
 
+    void measuresTheLimitUsingExactOnDiskBytes() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        RotatingLogger logger(temporaryDirectory.path(), 8);
+        QVERIFY(logger.install());
+
+        logger.write(QString(7, QLatin1Char('A')));
+        logger.uninstall();
+
+        QCOMPARE(readBytes(temporaryDirectory.filePath(QStringLiteral("cimbarpunk.log"))), QByteArray("AAAAAAA\n"));
+    }
+
+    void truncatesOversizedUtf8AtCodePointBoundaryWithTerminator() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        RotatingLogger logger(temporaryDirectory.path(), 7);
+        QVERIFY(logger.install());
+
+        logger.write(QStringLiteral("éééé"));
+        logger.uninstall();
+
+        QCOMPARE(readBytes(temporaryDirectory.filePath(QStringLiteral("cimbarpunk.log"))), QStringLiteral("ééé\n").toUtf8());
+    }
+
+    void disablesTheSinkAfterAWriteFailure() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        auto failingFile = std::make_unique<FailingWriteFile>();
+        FailingWriteFile* const observedFile = failingFile.get();
+        RotatingLogger logger(temporaryDirectory.path(), 1024, std::move(failingFile));
+        QVERIFY(logger.install());
+
+        logger.write(QStringLiteral("first"));
+        logger.write(QStringLiteral("second"));
+
+        QCOMPARE(observedFile->writeAttempts, 1);
+    }
+
     void writesOnlyImageMetadataNeverPixelBytes() {
         QTemporaryDir temporaryDirectory;
         QVERIFY(temporaryDirectory.isValid());
@@ -69,11 +124,12 @@ private slots:
         logger.writeImageDiagnostics(image);
         logger.uninstall();
 
-        const QString diagnostics = readFile(temporaryDirectory.filePath(QStringLiteral("cimbarpunk.log")));
+        const QByteArray rawDiagnostics = readBytes(temporaryDirectory.filePath(QStringLiteral("cimbarpunk.log")));
+        const QString diagnostics = QString::fromUtf8(rawDiagnostics);
         QVERIFY(diagnostics.contains(QStringLiteral("7x11")));
         QVERIFY(diagnostics.contains(QStringLiteral("RGBA8888")));
         const QByteArray pixelBytes(reinterpret_cast<const char*>(image.constBits()), image.sizeInBytes());
-        QVERIFY(!diagnostics.contains(QString::fromLatin1(pixelBytes)));
+        QVERIFY(!rawDiagnostics.contains(pixelBytes));
     }
 };
 

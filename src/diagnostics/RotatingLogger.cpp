@@ -11,11 +11,59 @@
 
 namespace cimbarpunk {
 
+namespace {
+
+QByteArray boundedRecord(const QStringView message, const qsizetype maximumBytes) {
+    if (maximumBytes <= 0) {
+        return {};
+    }
+
+    QString text = message.toString();
+    QByteArray encoded = text.toUtf8();
+    if (!encoded.endsWith('\n')) {
+        encoded.append('\n');
+    }
+    if (encoded.size() <= maximumBytes) {
+        return encoded;
+    }
+
+    if (text.endsWith('\n')) {
+        text.chop(1);
+    }
+
+    QByteArray bounded;
+    const qsizetype payloadLimit = maximumBytes - 1;
+    for (qsizetype index = 0; index < text.size();) {
+        qsizetype codeUnitCount = 1;
+        if (text.at(index).isHighSurrogate() && index + 1 < text.size() && text.at(index + 1).isLowSurrogate()) {
+            codeUnitCount = 2;
+        }
+
+        const QByteArray codePoint = QStringView(text).sliced(index, codeUnitCount).toString().toUtf8();
+        if (bounded.size() + codePoint.size() > payloadLimit) {
+            break;
+        }
+        bounded.append(codePoint);
+        index += codeUnitCount;
+    }
+    bounded.append('\n');
+    return bounded;
+}
+
+} // namespace
+
 RotatingLogger::RotatingLogger(QString directory, const qsizetype maximumFileBytes)
+    : RotatingLogger(std::move(directory), maximumFileBytes, std::make_unique<QFile>()) {
+}
+
+RotatingLogger::RotatingLogger(QString directory, const qsizetype maximumFileBytes, std::unique_ptr<QFile> file)
     : m_directory(std::move(directory))
     , m_maximumFileBytes(maximumFileBytes)
-    , m_file(std::make_unique<QFile>())
+    , m_file(std::move(file))
     , m_mutex(std::make_unique<QMutex>()) {
+    if (!m_file) {
+        m_file = std::make_unique<QFile>();
+    }
     if (m_directory.isEmpty()) {
         m_directory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     }
@@ -35,7 +83,7 @@ bool RotatingLogger::install() {
     }
 
     m_file->setFileName(currentFilePath());
-    return m_file->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    return m_file->open(QIODevice::WriteOnly | QIODevice::Append);
 }
 
 void RotatingLogger::write(const QStringView message) {
@@ -44,22 +92,19 @@ void RotatingLogger::write(const QStringView message) {
         return;
     }
 
-    QByteArray encoded = message.toString().toUtf8();
-    if (!encoded.endsWith('\n')) {
-        encoded.append('\n');
-    }
-    if (m_maximumFileBytes <= 0) {
+    const QByteArray encoded = boundedRecord(message, m_maximumFileBytes);
+    if (encoded.isEmpty()) {
         return;
-    }
-    if (encoded.size() > m_maximumFileBytes) {
-        encoded.truncate(m_maximumFileBytes);
     }
     if (m_file->size() > 0 && m_file->size() + encoded.size() > m_maximumFileBytes && !rotate()) {
         return;
     }
 
-    m_file->write(encoded);
-    m_file->flush();
+    const qint64 written = m_file->write(encoded);
+    const bool flushed = written == encoded.size() && m_file->flush();
+    if (written != encoded.size() || !flushed) {
+        m_file->close();
+    }
 }
 
 void RotatingLogger::writeImageDiagnostics(const QImage& image) {
@@ -94,7 +139,7 @@ bool RotatingLogger::rotate() {
             QFile::remove(destination);
             if (!QFile::rename(source, destination)) {
                 m_file->setFileName(currentPath);
-                m_file->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+                m_file->open(QIODevice::WriteOnly | QIODevice::Append);
                 return false;
             }
         }
@@ -103,12 +148,12 @@ bool RotatingLogger::rotate() {
     QFile::remove(currentPath + QStringLiteral(".1"));
     if (!QFile::rename(currentPath, currentPath + QStringLiteral(".1"))) {
         m_file->setFileName(currentPath);
-        m_file->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+        m_file->open(QIODevice::WriteOnly | QIODevice::Append);
         return false;
     }
 
     m_file->setFileName(currentPath);
-    return m_file->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    return m_file->open(QIODevice::WriteOnly | QIODevice::Append);
 }
 
 } // namespace cimbarpunk
