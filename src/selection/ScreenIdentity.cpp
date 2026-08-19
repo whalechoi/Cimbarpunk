@@ -9,7 +9,10 @@ namespace cimbarpunk {
 QString ScreenIdentity::fromParts(const QString& manufacturer, const QString& model, const QString& serial,
     const QString& name, const QRect& geometry, qreal devicePixelRatio) {
     if (!manufacturer.isEmpty() && !model.isEmpty() && !serial.isEmpty()) {
-        return manufacturer + u':' + model + u':' + serial;
+        const auto encode = [](const QString& value) {
+            return QString::number(value.size()) + u':' + value;
+        };
+        return QStringLiteral("primary:") + encode(manufacturer) + encode(model) + encode(serial);
     }
 
     const QString canonical = name + u'|' + QString::number(geometry.x()) + u'|' + QString::number(geometry.y())

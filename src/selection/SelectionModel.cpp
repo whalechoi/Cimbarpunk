@@ -23,10 +23,10 @@ void SelectionModel::setScreenGeometry(const QRectF& geometry) {
     }
 
     m_screenGeometry = next;
-    emit screenGeometryChanged();
     if (m_hasSelection) {
         applySelection(clampRect(m_selection));
     }
+    emit screenGeometryChanged();
 }
 
 QRectF SelectionModel::selection() const {
@@ -97,32 +97,32 @@ void SelectionModel::resizeBy(ResizeHandle handle, const QPointF& delta) {
     qreal bottom = m_selection.bottom();
     switch (handle) {
     case ResizeHandle::TopLeft:
-        left = std::min(left + delta.x(), right - minimumSize);
-        top = std::min(top + delta.y(), bottom - minimumSize);
+        left = std::clamp(left + delta.x(), m_screenGeometry.left(), right - minimumSize);
+        top = std::clamp(top + delta.y(), m_screenGeometry.top(), bottom - minimumSize);
         break;
     case ResizeHandle::Top:
-        top = std::min(top + delta.y(), bottom - minimumSize);
+        top = std::clamp(top + delta.y(), m_screenGeometry.top(), bottom - minimumSize);
         break;
     case ResizeHandle::TopRight:
-        right = std::max(right + delta.x(), left + minimumSize);
-        top = std::min(top + delta.y(), bottom - minimumSize);
+        right = std::clamp(right + delta.x(), left + minimumSize, m_screenGeometry.right());
+        top = std::clamp(top + delta.y(), m_screenGeometry.top(), bottom - minimumSize);
         break;
     case ResizeHandle::Right:
-        right = std::max(right + delta.x(), left + minimumSize);
+        right = std::clamp(right + delta.x(), left + minimumSize, m_screenGeometry.right());
         break;
     case ResizeHandle::BottomRight:
-        right = std::max(right + delta.x(), left + minimumSize);
-        bottom = std::max(bottom + delta.y(), top + minimumSize);
+        right = std::clamp(right + delta.x(), left + minimumSize, m_screenGeometry.right());
+        bottom = std::clamp(bottom + delta.y(), top + minimumSize, m_screenGeometry.bottom());
         break;
     case ResizeHandle::Bottom:
-        bottom = std::max(bottom + delta.y(), top + minimumSize);
+        bottom = std::clamp(bottom + delta.y(), top + minimumSize, m_screenGeometry.bottom());
         break;
     case ResizeHandle::BottomLeft:
-        left = std::min(left + delta.x(), right - minimumSize);
-        bottom = std::max(bottom + delta.y(), top + minimumSize);
+        left = std::clamp(left + delta.x(), m_screenGeometry.left(), right - minimumSize);
+        bottom = std::clamp(bottom + delta.y(), top + minimumSize, m_screenGeometry.bottom());
         break;
     case ResizeHandle::Left:
-        left = std::min(left + delta.x(), right - minimumSize);
+        left = std::clamp(left + delta.x(), m_screenGeometry.left(), right - minimumSize);
         break;
     }
     applySelection(clampRect(QRectF(left, top, right - left, bottom - top)));
