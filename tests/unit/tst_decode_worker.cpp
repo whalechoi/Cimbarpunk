@@ -12,10 +12,13 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <future>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <system_error>
 #include <vector>
 
 using cimbarpunk::DecodeWorker;
@@ -30,10 +33,20 @@ namespace cimbarpunk {
 
 class DecodeWorkerTestAccess final {
 public:
-    [[nodiscard]] static bool waitUntilRejectingFrames(
+    using ThreadEntry = std::function<void(std::stop_token)>;
+    using ThreadLauncher = std::function<std::jthread(ThreadEntry)>;
+
+    [[nodiscard]] static std::unique_ptr<DecodeWorker> createWithTestSeams(
+        IDecoder& decoder, IOutputStore& outputStore, RotatingLogger& logger,
+        ThreadLauncher threadLauncher, std::function<void()> beforeAdmission) {
+        return std::unique_ptr<DecodeWorker>(new DecodeWorker(decoder, outputStore, logger,
+            std::move(threadLauncher), std::move(beforeAdmission), nullptr));
+    }
+
+    [[nodiscard]] static bool waitUntilCancellationRequested(
         const DecodeWorker& worker, const std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
-        while (worker.m_state.load(std::memory_order_acquire) == DecodeWorker::WorkerState::Accepting) {
+        while (!worker.m_cancelRequested.load(std::memory_order_acquire)) {
             if (std::chrono::steady_clock::now() >= deadline) {
                 return false;
             }
@@ -44,6 +57,24 @@ public:
 
     [[nodiscard]] static bool hasJoinableThread(const DecodeWorker& worker) {
         return worker.m_thread.joinable();
+    }
+
+    [[nodiscard]] static quint64 mailboxDroppedCount(const DecodeWorker& worker) {
+        return worker.m_mailbox.droppedCount();
+    }
+
+    [[nodiscard]] static bool isFullyStopped(const DecodeWorker& worker) {
+        return worker.m_state.load(std::memory_order_acquire) == DecodeWorker::WorkerState::Stopped
+            && worker.m_cancelRequested.load(std::memory_order_acquire)
+            && !worker.m_thread.joinable();
+    }
+
+    [[nodiscard]] static QString outputDirectory(const DecodeWorker& worker) {
+        return worker.m_outputDirectory;
+    }
+
+    [[nodiscard]] static std::optional<QImage> takeMailboxFrame(DecodeWorker& worker) {
+        return worker.m_mailbox.take();
     }
 };
 
@@ -213,6 +244,87 @@ private:
     int m_frameAcceptedCount = 0;
     int m_completedCount = 0;
     int m_failedCount = 0;
+};
+
+class BlockingGate final {
+public:
+    void enterAndWait() {
+        std::unique_lock lock(m_mutex);
+        m_entered = true;
+        m_stateChanged.notify_all();
+        m_stateChanged.wait(lock, [this] { return m_released; });
+    }
+
+    [[nodiscard]] bool waitUntilEntered(
+        const std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+        std::unique_lock lock(m_mutex);
+        return m_stateChanged.wait_for(lock, timeout, [this] { return m_entered; });
+    }
+
+    void release() {
+        const std::scoped_lock lock(m_mutex);
+        m_released = true;
+        m_stateChanged.notify_all();
+    }
+
+private:
+    std::mutex m_mutex;
+    std::condition_variable m_stateChanged;
+    bool m_entered = false;
+    bool m_released = false;
+};
+
+class PausableThreadLauncher final {
+public:
+    using ThreadEntry = std::function<void(std::stop_token)>;
+
+    std::jthread launch(ThreadEntry entry) {
+        int launchNumber = 0;
+        {
+            const std::scoped_lock lock(m_mutex);
+            launchNumber = ++m_launchCount;
+            if (m_released.size() <= static_cast<std::size_t>(launchNumber)) {
+                m_released.resize(static_cast<std::size_t>(launchNumber + 1), false);
+            }
+            m_stateChanged.notify_all();
+        }
+        return std::jthread([this, launchNumber, entry = std::move(entry)](
+                                const std::stop_token stopToken) mutable {
+            std::unique_lock lock(m_mutex);
+            m_stateChanged.wait(lock, [this, launchNumber] {
+                return m_released.at(static_cast<std::size_t>(launchNumber));
+            });
+            lock.unlock();
+            entry(stopToken);
+        });
+    }
+
+    void release(const int launchNumber) {
+        const std::scoped_lock lock(m_mutex);
+        if (m_released.size() <= static_cast<std::size_t>(launchNumber)) {
+            m_released.resize(static_cast<std::size_t>(launchNumber + 1), false);
+        }
+        m_released.at(static_cast<std::size_t>(launchNumber)) = true;
+        m_stateChanged.notify_all();
+    }
+
+    void releaseAll() {
+        const std::scoped_lock lock(m_mutex);
+        std::fill(m_released.begin(), m_released.end(), true);
+        m_stateChanged.notify_all();
+    }
+
+    [[nodiscard]] bool waitForLaunchCount(
+        const int count, const std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+        std::unique_lock lock(m_mutex);
+        return m_stateChanged.wait_for(lock, timeout, [this, count] { return m_launchCount >= count; });
+    }
+
+private:
+    std::mutex m_mutex;
+    std::condition_variable m_stateChanged;
+    std::vector<bool> m_released{false};
+    int m_launchCount = 0;
 };
 
 QImage solidImage(const QColor& color) {
@@ -399,7 +511,7 @@ private slots:
         });
         const auto releaseBlockedStopper = qScopeGuard([&decoder] { decoder.releaseFirstDecode(); });
         QVERIFY(stopEntered.wait_for(2s) == std::future_status::ready);
-        QVERIFY2(cimbarpunk::DecodeWorkerTestAccess::waitUntilRejectingFrames(worker),
+        QVERIFY2(cimbarpunk::DecodeWorkerTestAccess::waitUntilCancellationRequested(worker),
             "stop() did not close the frame entrance");
         QCOMPARE(stopReturned.wait_for(100ms), std::future_status::timeout);
 
@@ -534,7 +646,7 @@ private slots:
             stopReturnedPromise.set_value();
         });
         const auto releaseBlockedStopper = qScopeGuard([&decoder] { decoder.releaseFirstDecode(); });
-        QVERIFY2(cimbarpunk::DecodeWorkerTestAccess::waitUntilRejectingFrames(worker),
+        QVERIFY2(cimbarpunk::DecodeWorkerTestAccess::waitUntilCancellationRequested(worker),
             "stop() did not close the frame entrance");
         QCOMPARE(stopReturned.wait_for(0s), std::future_status::timeout);
 
@@ -546,6 +658,194 @@ private slots:
         QCOMPARE(outputStore.commitCount(), 0);
         QCOMPARE(recordedSignals.completedCount(), 0);
         QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(worker));
+    }
+
+    void stopBeforeDecoderEntryPreventsANewDecodeCall() {
+        using namespace std::chrono_literals;
+
+        FakeDecoder decoder;
+        FakeOutputStore outputStore;
+        QTemporaryDir outputDirectory;
+        QVERIFY(outputDirectory.isValid());
+        RotatingLogger logger(outputDirectory.path());
+        QVERIFY(logger.install());
+        DecodeWorker worker(decoder, outputStore, logger);
+        BlockingGate beforeDecoder;
+        QObject::connect(&worker, &DecodeWorker::frameAccepted, &worker,
+            [&beforeDecoder] { beforeDecoder.enterAndWait(); }, Qt::DirectConnection);
+        const auto releaseAndStop = qScopeGuard([&] {
+            beforeDecoder.release();
+            worker.stop();
+        });
+
+        QString error;
+        QVERIFY2(worker.start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
+        worker.submitFrame(solidImage(Qt::red));
+        QVERIFY2(beforeDecoder.waitUntilEntered(), "frameAccepted did not reach the decoder-entry gate");
+
+        std::promise<void> stopReturnedPromise;
+        std::future<void> stopReturned = stopReturnedPromise.get_future();
+        std::jthread stopper([&] {
+            worker.stop();
+            stopReturnedPromise.set_value();
+        });
+        const auto releaseBlockedStopper = qScopeGuard([&beforeDecoder] { beforeDecoder.release(); });
+        QVERIFY2(cimbarpunk::DecodeWorkerTestAccess::waitUntilCancellationRequested(worker),
+            "stop() did not win before decoder entry");
+        QCOMPARE(stopReturned.wait_for(0s), std::future_status::timeout);
+
+        beforeDecoder.release();
+        QVERIFY2(stopReturned.wait_for(2s) == std::future_status::ready,
+            "stop() did not join after the decoder-entry gate opened");
+        stopper.join();
+
+        QCOMPARE(decoder.decodeCount(), std::size_t{0});
+        QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(worker));
+    }
+
+    void directProgressHandlerCanRequestStopWithoutSelfJoining() {
+        using namespace std::chrono_literals;
+
+        DecodedPayload payload{
+            .suggestedName = QStringLiteral("direct-stop.bin"),
+            .fallbackName = QStringLiteral("direct-stop-stream"),
+            .compressedBytes = QByteArrayLiteral("compressed")
+        };
+        FakeDecoder decoder({cimbarpunk::DecodeUpdate{.progress = 1.0, .completed = payload}});
+        FakeOutputStore outputStore;
+        QTemporaryDir outputDirectory;
+        QVERIFY(outputDirectory.isValid());
+        RotatingLogger logger(outputDirectory.path());
+        QVERIFY(logger.install());
+        DecodeWorker worker(decoder, outputStore, logger);
+        WorkerSignalRecorder recordedSignals;
+        std::promise<void> handlerEnteredPromise;
+        std::future<void> handlerEntered = handlerEnteredPromise.get_future();
+        std::promise<void> selfStopReturnedPromise;
+        std::future<void> selfStopReturned = selfStopReturnedPromise.get_future();
+        QObject::connect(&worker, &DecodeWorker::progressChanged, &worker,
+            [&](const double) {
+                handlerEnteredPromise.set_value();
+                worker.stop();
+                selfStopReturnedPromise.set_value();
+            },
+            Qt::DirectConnection);
+        QObject::connect(&worker, &DecodeWorker::completed, &worker,
+            [&recordedSignals](const OutputResult& result) { recordedSignals.recordCompleted(result); },
+            Qt::DirectConnection);
+        const auto stopWorker = qScopeGuard([&worker] { worker.stop(); });
+
+        QString error;
+        QVERIFY2(worker.start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
+        worker.submitFrame(solidImage(Qt::yellow));
+        QVERIFY2(handlerEntered.wait_for(2s) == std::future_status::ready,
+            "the direct progress handler did not run");
+        QVERIFY2(selfStopReturned.wait_for(2s) == std::future_status::ready,
+            "stop() did not return normally on its own worker thread");
+
+        worker.stop();
+
+        QCOMPARE(decoder.decodeCount(), std::size_t{1});
+        QCOMPARE(outputStore.commitCount(), 0);
+        QCOMPARE(recordedSignals.completedCount(), 0);
+        QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(worker));
+    }
+
+    void staleSubmitCannotCrossAStopRestartSessionBoundary() {
+        FakeDecoder decoder;
+        FakeOutputStore outputStore;
+        QTemporaryDir outputDirectory;
+        QVERIFY(outputDirectory.isValid());
+        RotatingLogger logger(outputDirectory.path());
+        QVERIFY(logger.install());
+        PausableThreadLauncher launcher;
+        launcher.release(1);
+        BlockingGate oldAdmission;
+        std::unique_ptr<DecodeWorker> worker = cimbarpunk::DecodeWorkerTestAccess::createWithTestSeams(
+            decoder, outputStore, logger,
+            [&launcher](cimbarpunk::DecodeWorkerTestAccess::ThreadEntry entry) {
+                return launcher.launch(std::move(entry));
+            },
+            [&oldAdmission] { oldAdmission.enterAndWait(); });
+        const auto releaseAndStop = qScopeGuard([&] {
+            oldAdmission.release();
+            launcher.releaseAll();
+            worker->stop();
+        });
+
+        QString error;
+        QVERIFY2(worker->start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
+        std::jthread staleSubmitter([&] { worker->submitFrame(solidImage(Qt::red)); });
+        const auto releaseStaleSubmitter = qScopeGuard([&oldAdmission] { oldAdmission.release(); });
+        QVERIFY2(oldAdmission.waitUntilEntered(), "the old submit did not reach its admission gate");
+
+        worker->stop();
+        QVERIFY2(worker->start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
+        QVERIFY2(launcher.waitForLaunchCount(2), "the replacement worker was not launched");
+
+        oldAdmission.release();
+        staleSubmitter.join();
+        worker->submitFrame(solidImage(Qt::blue));
+        QCOMPARE(cimbarpunk::DecodeWorkerTestAccess::mailboxDroppedCount(*worker), quint64{0});
+
+        launcher.release(2);
+        QVERIFY2(decoder.waitForDecodeCount(1), "the new session did not decode its blue frame");
+        worker->stop();
+
+        QCOMPARE(decoder.seenColors(), std::vector<QColor>{QColor(Qt::blue)});
+        QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(*worker));
+    }
+
+    void threadLaunchFailureRollsBackThePreparedSession() {
+        FakeDecoder decoder;
+        FakeOutputStore outputStore;
+        QTemporaryDir outputDirectory;
+        QVERIFY(outputDirectory.isValid());
+        RotatingLogger logger(outputDirectory.path());
+        QVERIFY(logger.install());
+        std::unique_ptr<DecodeWorker> worker = cimbarpunk::DecodeWorkerTestAccess::createWithTestSeams(
+            decoder, outputStore, logger,
+            [](cimbarpunk::DecodeWorkerTestAccess::ThreadEntry) -> std::jthread {
+                throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again),
+                    "controlled thread launch failure");
+            },
+            {});
+
+        QString error;
+        QVERIFY(!worker->start(fullFrameSelection(), outputDirectory.path(), &error));
+
+        QCOMPARE(error, QStringLiteral("无法启动解码线程"));
+        QCOMPARE(outputStore.prepareCount(), 1);
+        QCOMPARE(decoder.resetCount(), 2);
+        QVERIFY(cimbarpunk::DecodeWorkerTestAccess::isFullyStopped(*worker));
+        QVERIFY(cimbarpunk::DecodeWorkerTestAccess::outputDirectory(*worker).isEmpty());
+        worker->submitFrame(solidImage(Qt::red));
+
+        std::promise<std::optional<QImage>> mailboxResultPromise;
+        std::future<std::optional<QImage>> mailboxResult = mailboxResultPromise.get_future();
+        std::jthread mailboxTaker([&] {
+            mailboxResultPromise.set_value(
+                cimbarpunk::DecodeWorkerTestAccess::takeMailboxFrame(*worker));
+        });
+        const bool mailboxStopped = mailboxResult.wait_for(std::chrono::milliseconds(250))
+            == std::future_status::ready;
+        if (!mailboxStopped) {
+            worker->stop();
+        }
+        mailboxTaker.join();
+        const std::optional<QImage> rolledBackFrame = mailboxResult.get();
+
+        worker->stop();
+        QVERIFY2(mailboxStopped, "thread-launch rollback did not stop the mailbox");
+        QVERIFY(!rolledBackFrame.has_value());
+        QCOMPARE(decoder.decodeCount(), std::size_t{0});
+        QCOMPARE(decoder.resetCount(), 2);
+
+        QFile logFile(outputDirectory.filePath(QStringLiteral("cimbarpunk.log")));
+        QVERIFY(logFile.open(QIODevice::ReadOnly));
+        const QByteArray diagnostic = logFile.readAll();
+        QVERIFY(diagnostic.contains("Decode worker thread launch failed"));
+        QVERIFY(diagnostic.contains("controlled thread launch failure"));
     }
 };
 
