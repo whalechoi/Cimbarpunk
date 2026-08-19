@@ -123,7 +123,7 @@ add_library(cimbarpunk_tray STATIC
     tray/TrayController.h
 )
 target_include_directories(cimbarpunk_tray PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cimbarpunk_tray PUBLIC cimbarpunk_settings Qt6::Core Qt6::Gui Qt6::Widgets)
+target_link_libraries(cimbarpunk_tray PUBLIC cimbarpunk_settings Qt6::Core Qt6::Gui Qt6::Svg Qt6::Widgets)
 set_source_files_properties(${PROJECT_SOURCE_DIR}/resources/icons/tray.svg PROPERTIES
     QT_RESOURCE_ALIAS icons/tray.svg
 )
@@ -156,3 +156,6 @@ target_link_libraries(cimbarpunk_app PUBLIC
 qt_add_executable(cimbarpunk app/main.cpp)
 target_link_libraries(cimbarpunk PRIVATE cimbarpunk_app Qt6::Core Qt6::Gui Qt6::Widgets)
 set_target_properties(cimbarpunk PROPERTIES WIN32_EXECUTABLE TRUE)
+
+include(${PROJECT_SOURCE_DIR}/cmake/Deploy.cmake)
+cimbarpunk_configure_deploy(cimbarpunk)

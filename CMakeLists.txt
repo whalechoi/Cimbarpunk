@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 
 include(CTest)
 
-find_package(Qt6 6.8.4 EXACT REQUIRED COMPONENTS Core Gui Widgets Quick Qml Multimedia Test)
+find_package(Qt6 6.8.4 EXACT REQUIRED COMPONENTS Core Gui Widgets Quick Qml Multimedia Svg Test)
 find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs photo calib3d)
 
 qt_standard_project_setup(REQUIRES 6.8)

@@ -166,6 +166,8 @@ set_tests_properties(session PROPERTIES
 
 add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_qt_screen_capture_source tst_selection_overlay_controller tst_tray_controller tst_app_runtime tst_decoder tst_session)
 
+add_subdirectory(manual/frame_player)
+
 add_executable(generate_cimbar_fixture EXCLUDE_FROM_ALL tools/generate_cimbar_fixture.cpp)
 target_include_directories(generate_cimbar_fixture PRIVATE
     ${OpenCV_INCLUDE_DIRS}
