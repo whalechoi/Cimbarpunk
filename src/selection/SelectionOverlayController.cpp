@@ -59,6 +59,8 @@ void SelectionOverlayController::showForResolvedScreen(QScreen* screen, const QS
         return;
     }
 
+    m_model.endDrag();
+    releaseInputGrabs();
     m_screenId = screenId;
     m_acceptEmitted = false;
     m_cancelEmitted = false;
@@ -70,6 +72,11 @@ void SelectionOverlayController::showForResolvedScreen(QScreen* screen, const QS
     }
     m_view->setScreen(screen);
     m_view->setGeometry(geometry);
+    if (QObject* root = m_view->rootObject(); root != nullptr) {
+        const qreal devicePixelRatio = m_view->devicePixelRatio();
+        root->setProperty("borderGap",
+            devicePixelRatio > 0.0 ? 1.0 / devicePixelRatio : 1.0);
+    }
     m_model.setScreenGeometry(geometry);
     m_model.setSelection({});
     if (normalizedRect.has_value()) {
@@ -77,6 +84,10 @@ void SelectionOverlayController::showForResolvedScreen(QScreen* screen, const QS
     }
     publishSelection();
     m_view->show();
+    m_view->requestActivate();
+    if (QQuickItem* root = m_view->rootObject(); root != nullptr) {
+        root->forceActiveFocus(Qt::ActiveWindowFocusReason);
+    }
 }
 
 void SelectionOverlayController::enterCaptureMode() {

@@ -147,6 +147,34 @@ private slots:
         QVERIFY(!controller.m_view->isVisible());
     }
 
+    void reshowCancelsAHeldBackgroundDragBeforeRestoringTheNewSelection() {
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, std::nullopt);
+        QQuickItem* root = controller.m_view->rootObject();
+        QVERIFY(root != nullptr);
+        QCoreApplication::processEvents();
+
+        QTest::mousePress(controller.m_view.get(), Qt::LeftButton, Qt::NoModifier,
+            QPoint(60, 60));
+        QTest::mouseMove(controller.m_view.get(), QPoint(180, 180), 5);
+        QTRY_VERIFY(controller.m_view->mouseGrabberItem() != nullptr);
+        QVERIFY(controller.m_model.hasSelection());
+
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+        const QRectF restoredSelection = controller.m_model.selection();
+        QVERIFY(QMetaObject::invokeMethod(root, "dragUpdated", Qt::DirectConnection,
+            Q_ARG(QPointF, QPointF(420, 360))));
+        QTest::mouseMove(controller.m_view.get(), QPoint(430, 370), 5);
+        QTest::mouseRelease(controller.m_view.get(), Qt::LeftButton, Qt::NoModifier,
+            QPoint(430, 370));
+        QCoreApplication::processEvents();
+
+        QCOMPARE(controller.m_model.selection(), restoredSelection);
+        QVERIFY(controller.m_view->mouseGrabberItem() == nullptr);
+    }
+
     void convertsQmlLocalDragCoordinatesOnANegativeXScreen() {
         QScreen* screen = QGuiApplication::primaryScreen();
         QVERIFY(screen != nullptr);
@@ -198,8 +226,8 @@ private slots:
         cimbarpunk::SelectionOverlayController controller;
         controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
         QSignalSpy accepted(&controller, &cimbarpunk::SelectionOverlayController::accepted);
-        controller.m_view->requestActivate();
         QTRY_VERIFY(controller.m_view->isActive());
+        QTRY_VERIFY(controller.m_view->rootObject()->hasActiveFocus());
 
         QTest::keyClick(controller.m_view.get(), Qt::Key_Return);
         QTest::keyClick(controller.m_view.get(), Qt::Key_Enter);
@@ -213,8 +241,8 @@ private slots:
         cimbarpunk::SelectionOverlayController controller;
         controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
         QSignalSpy cancelled(&controller, &cimbarpunk::SelectionOverlayController::cancelled);
-        controller.m_view->requestActivate();
         QTRY_VERIFY(controller.m_view->isActive());
+        QTRY_VERIFY(controller.m_view->rootObject()->hasActiveFocus());
 
         QTest::keyClick(controller.m_view.get(), Qt::Key_Escape);
 
@@ -255,10 +283,16 @@ private slots:
         QVERIFY(borderBottom != nullptr);
         QVERIFY(borderLeft != nullptr);
         QVERIFY(borderRight != nullptr);
-        QCOMPARE(itemGeometry(borderTop), QRectF(crop.x(), crop.y() - 2, crop.width(), 2));
-        QCOMPARE(itemGeometry(borderBottom), QRectF(crop.x(), crop.bottom(), crop.width(), 2));
-        QCOMPARE(itemGeometry(borderLeft), QRectF(crop.x() - 2, crop.y(), 2, crop.height()));
-        QCOMPARE(itemGeometry(borderRight), QRectF(crop.right(), crop.y(), 2, crop.height()));
+        const qreal borderGap = root->property("borderGap").toReal();
+        QVERIFY(borderGap * controller.m_view->devicePixelRatio() >= 1.0);
+        QCOMPARE(itemGeometry(borderTop),
+            QRectF(crop.x(), crop.y() - borderGap - 2, crop.width(), 2));
+        QCOMPARE(itemGeometry(borderBottom),
+            QRectF(crop.x(), crop.bottom() + borderGap, crop.width(), 2));
+        QCOMPARE(itemGeometry(borderLeft),
+            QRectF(crop.x() - borderGap - 2, crop.y(), 2, crop.height()));
+        QCOMPARE(itemGeometry(borderRight),
+            QRectF(crop.right() + borderGap, crop.y(), 2, crop.height()));
 
         for (int handle = 0; handle < 8; ++handle) {
             QQuickItem* item = itemByName(root,
@@ -314,6 +348,50 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(root, "moveRequested", Qt::DirectConnection,
             Q_ARG(QPointF, QPointF(100, 100))));
         QCOMPARE(controller.m_model.selection(), before);
+    }
+
+    void adjustmentToolbarUsesOnlyAFullyFittingSide_data() {
+        QTest::addColumn<QRectF>("normalized");
+        QTest::addColumn<QString>("side");
+        QTest::addColumn<bool>("visible");
+        QTest::newRow("below-top-edge") << QRectF(0.25, 0, 0.5, 0.5)
+                                          << QStringLiteral("below") << true;
+        QTest::newRow("above-bottom-edge") << QRectF(0.25, 0.5, 0.5, 0.5)
+                                             << QStringLiteral("above") << true;
+        QTest::newRow("right-left-edge") << QRectF(0, 0, 0.75, 1)
+                                           << QStringLiteral("right") << true;
+        QTest::newRow("left-right-edge") << QRectF(0.25, 0, 0.75, 1)
+                                           << QStringLiteral("left") << true;
+        QTest::newRow("none-nearly-full") << QRectF(0.025, 0.025, 0.95, 0.95)
+                                            << QString() << false;
+        QTest::newRow("none-exact-full") << QRectF(0, 0, 1, 1) << QString() << false;
+    }
+
+    void adjustmentToolbarUsesOnlyAFullyFittingSide() {
+        QFETCH(QRectF, normalized);
+        QFETCH(QString, side);
+        QFETCH(bool, visible);
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, normalized);
+        QCoreApplication::processEvents();
+        QQuickItem* root = controller.m_view->rootObject();
+        QVERIFY(root != nullptr);
+        QQuickItem* toolbar = itemByName(root, "toolbar");
+        QVERIFY(toolbar != nullptr);
+
+        QCOMPARE(root->property("toolbarVisible").toBool(), visible);
+        QCOMPARE(root->property("toolbarSide").toString(), side);
+        QCOMPARE(toolbar->isVisible(), visible);
+        if (visible) {
+            const QRectF toolbarRect = root->property("toolbarRect").toRectF();
+            const QRectF crop = root->property("selectionRect").toRectF();
+            const QRectF bounds(0, 0, root->width(), root->height());
+            QCOMPARE(itemGeometry(toolbar), toolbarRect);
+            QVERIFY(bounds.contains(toolbarRect));
+            QVERIFY(!toolbarRect.intersects(crop));
+        }
     }
 
     void captureModeHidesExactlyFullScreenButNotNearlyFullScreen() {
@@ -456,6 +534,61 @@ private slots:
         QVERIFY(!capture.isNull());
         QCOMPARE(sampleLocalPixel(capture, logicalSize, crop.center()).alpha(), 0);
         QCOMPARE(sampleLocalPixel(capture, logicalSize, QPointF(10, 10)).alpha(), 0);
+    }
+
+    void fractionalPhysicalCropKeepsOneRenderedPixelClearOfTheBorder() {
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        const QSize screenSize = screen->geometry().size();
+        const QRectF localCrop(100.75, 100.75,
+            std::min(299.5, screenSize.width() - 201.0),
+            std::min(199.5, screenSize.height() - 201.0));
+        QVERIFY(localCrop.width() >= 24.0);
+        QVERIFY(localCrop.height() >= 24.0);
+        const QRectF normalized(localCrop.x() / screenSize.width(),
+            localCrop.y() / screenSize.height(), localCrop.width() / screenSize.width(),
+            localCrop.height() / screenSize.height());
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, normalized);
+        QQuickItem* root = controller.m_view->rootObject();
+        QVERIFY(root != nullptr);
+        controller.enterCaptureMode();
+        QCoreApplication::processEvents();
+
+        const QImage capture = controller.m_view->grabWindow();
+        QVERIFY(!capture.isNull());
+        const QSizeF logicalSize(root->width(), root->height());
+        const QRectF crop = root->property("selectionRect").toRectF();
+        const qreal scaleX = capture.width() / logicalSize.width();
+        const qreal scaleY = capture.height() / logicalSize.height();
+        const qreal borderGap = root->property("borderGap").toReal();
+        const QRect physicalCrop(qFloor(crop.x() * scaleX), qFloor(crop.y() * scaleY),
+            qCeil(crop.right() * scaleX) - qFloor(crop.x() * scaleX),
+            qCeil(crop.bottom() * scaleY) - qFloor(crop.y() * scaleY));
+        QVERIFY(QRect(QPoint(0, 0), capture.size()).contains(physicalCrop));
+        for (int y = physicalCrop.top(); y <= physicalCrop.bottom(); ++y) {
+            for (int x = physicalCrop.left(); x <= physicalCrop.right(); ++x) {
+                if (capture.pixelColor(x, y).alpha() != 0) {
+                    QFAIL(qPrintable(QStringLiteral(
+                        "crop pixel (%1,%2) has alpha %3; crop=%4,%5 %6x%7")
+                                         .arg(x)
+                                         .arg(y)
+                                         .arg(capture.pixelColor(x, y).alpha())
+                                         .arg(physicalCrop.x())
+                                         .arg(physicalCrop.y())
+                                         .arg(physicalCrop.width())
+                                         .arg(physicalCrop.height())));
+                }
+            }
+        }
+        QVERIFY2(borderGap * std::min(scaleX, scaleY) >= 1.0,
+            qPrintable(QStringLiteral("gap=%1 scale=%2x%3")
+                           .arg(borderGap)
+                           .arg(scaleX)
+                           .arg(scaleY)));
+
+        const QRectF topBorder = itemGeometry(itemByName(root, "borderTop"));
+        QVERIFY(sampleLocalPixel(capture, logicalSize, topBorder.center()).alpha() > 0);
     }
 };
 

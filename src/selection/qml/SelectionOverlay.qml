@@ -9,7 +9,15 @@ Item {
     property rect selectionRect: Qt.rect(0, 0, 0, 0)
     property bool captureMode: false
     property string statusText: "正在识别"
+    property real borderGap: 1
     readonly property bool adjustmentUiVisible: !captureMode && selectionModel.hasSelection
+    readonly property real toolbarWidth: 132
+    readonly property real toolbarHeight: 32
+    readonly property real toolbarGap: 8
+    readonly property var toolbarPlacement: calculateToolbarPlacement()
+    readonly property string toolbarSide: toolbarPlacement.side
+    readonly property rect toolbarRect: toolbarPlacement.rect
+    readonly property bool toolbarVisible: adjustmentUiVisible && toolbarSide !== ""
     readonly property real statusWidth: 160
     readonly property real statusHeight: 32
     readonly property real statusGap: 8
@@ -17,6 +25,35 @@ Item {
     readonly property string statusSide: statusPlacement.side
     readonly property rect statusRect: statusPlacement.rect
     readonly property bool statusVisible: captureMode && statusSide !== ""
+
+    function calculateToolbarPlacement() {
+        const crop = selectionRect
+        const centeredX = Math.max(0, Math.min(width - toolbarWidth,
+            crop.x + (crop.width - toolbarWidth) / 2))
+        const centeredY = Math.max(0, Math.min(height - toolbarHeight,
+            crop.y + (crop.height - toolbarHeight) / 2))
+        const fitsHorizontally = width >= toolbarWidth
+        const fitsVertically = height >= toolbarHeight
+        if (fitsHorizontally
+                && height - crop.y - crop.height >= toolbarHeight + toolbarGap) {
+            return {"side": "below", "rect": Qt.rect(centeredX,
+                crop.y + crop.height + toolbarGap, toolbarWidth, toolbarHeight)}
+        }
+        if (fitsHorizontally && crop.y >= toolbarHeight + toolbarGap) {
+            return {"side": "above", "rect": Qt.rect(centeredX,
+                crop.y - toolbarGap - toolbarHeight, toolbarWidth, toolbarHeight)}
+        }
+        if (fitsVertically
+                && width - crop.x - crop.width >= toolbarWidth + toolbarGap) {
+            return {"side": "right", "rect": Qt.rect(
+                crop.x + crop.width + toolbarGap, centeredY, toolbarWidth, toolbarHeight)}
+        }
+        if (fitsVertically && crop.x >= toolbarWidth + toolbarGap) {
+            return {"side": "left", "rect": Qt.rect(crop.x - toolbarGap - toolbarWidth,
+                centeredY, toolbarWidth, toolbarHeight)}
+        }
+        return {"side": "", "rect": Qt.rect(0, 0, 0, 0)}
+    }
 
     function calculateStatusPlacement() {
         const crop = selectionRect
@@ -128,7 +165,7 @@ Item {
     Rectangle {
         objectName: "borderTop"
         x: root.selectionRect.x
-        y: root.selectionRect.y - 2
+        y: root.selectionRect.y - root.borderGap - 2
         width: root.selectionRect.width
         height: 2
         color: "#00d084"
@@ -139,7 +176,7 @@ Item {
     Rectangle {
         objectName: "borderBottom"
         x: root.selectionRect.x
-        y: root.selectionRect.y + root.selectionRect.height
+        y: root.selectionRect.y + root.selectionRect.height + root.borderGap
         width: root.selectionRect.width
         height: 2
         color: "#00d084"
@@ -149,7 +186,7 @@ Item {
 
     Rectangle {
         objectName: "borderLeft"
-        x: root.selectionRect.x - 2
+        x: root.selectionRect.x - root.borderGap - 2
         y: root.selectionRect.y
         width: 2
         height: root.selectionRect.height
@@ -160,7 +197,7 @@ Item {
 
     Rectangle {
         objectName: "borderRight"
-        x: root.selectionRect.x + root.selectionRect.width
+        x: root.selectionRect.x + root.selectionRect.width + root.borderGap
         y: root.selectionRect.y
         width: 2
         height: root.selectionRect.height
@@ -280,16 +317,13 @@ Item {
     Rectangle {
         id: toolbar
         objectName: "toolbar"
-        width: 132
-        height: 32
-        x: Math.max(0, Math.min(root.width - width,
-            root.selectionRect.x + (root.selectionRect.width - width) / 2))
-        y: root.selectionRect.y + root.selectionRect.height + 8 + height <= root.height
-            ? root.selectionRect.y + root.selectionRect.height + 8
-            : Math.max(0, root.selectionRect.y - height - 8)
+        x: root.toolbarRect.x
+        y: root.toolbarRect.y
+        width: root.toolbarRect.width
+        height: root.toolbarRect.height
         color: "#dd20242a"
         radius: 6
-        visible: root.adjustmentUiVisible
+        visible: root.toolbarVisible
         z: 30
 
         Rectangle {
