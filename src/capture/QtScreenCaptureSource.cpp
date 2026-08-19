@@ -8,6 +8,7 @@
 #include <QVideoFrame>
 #include <QVideoSink>
 
+#include <algorithm>
 #include <utility>
 
 namespace cimbarpunk {
@@ -73,13 +74,18 @@ private:
 } // namespace detail
 
 QtScreenCaptureSource::QtScreenCaptureSource(QObject* parent)
-    : QtScreenCaptureSource(std::make_unique<detail::QtScreenCaptureBackend>(), parent) {
+    : QtScreenCaptureSource(std::make_unique<detail::QtScreenCaptureBackend>(),
+          std::chrono::seconds(5), parent) {
 }
 
 QtScreenCaptureSource::QtScreenCaptureSource(
-    std::unique_ptr<detail::IScreenCaptureBackend> backend, QObject* parent)
+    std::unique_ptr<detail::IScreenCaptureBackend> backend,
+    const std::chrono::milliseconds startupTimeout, QObject* parent)
     : ICaptureSource(parent)
-    , m_backend(std::move(backend)) {
+    , m_backend(std::move(backend))
+    , m_startupTimeout(std::max(startupTimeout, std::chrono::milliseconds(1))) {
+    m_startupTimer.setSingleShot(true);
+    m_startupTimer.setInterval(m_startupTimeout);
     if (m_backend == nullptr) {
         return;
     }
@@ -92,6 +98,8 @@ QtScreenCaptureSource::QtScreenCaptureSource(
 }
 
 QtScreenCaptureSource::~QtScreenCaptureSource() {
+    ++m_captureGeneration;
+    cancelStartupTimeout();
     if (m_backend != nullptr) {
         m_backend->setCallbacks({});
         if (m_started) {
@@ -130,13 +138,14 @@ bool QtScreenCaptureSource::start(QScreen* screen, QString* error) {
     m_failureEmitted = false;
     m_startInProgress = true;
     m_started = true;
+    const quint64 generation = ++m_captureGeneration;
     connectScreenSignals(screen);
     m_backend->setScreen(screen);
     if (m_started) {
         m_backend->start();
     }
     m_startInProgress = false;
-    if (!m_started) {
+    if (!m_started || generation != m_captureGeneration) {
         m_backend->stop();
         handleActiveChanged(false);
         if (error != nullptr) {
@@ -145,15 +154,21 @@ bool QtScreenCaptureSource::start(QScreen* screen, QString* error) {
         }
         return false;
     }
+    if (!m_active) {
+        armStartupTimeout(generation);
+    }
     return true;
 }
 
 void QtScreenCaptureSource::stop() {
     if (!m_started) {
+        cancelStartupTimeout();
         return;
     }
 
     m_started = false;
+    ++m_captureGeneration;
+    cancelStartupTimeout();
     disconnectScreenSignals();
     m_backend->stop();
     handleActiveChanged(false);
@@ -171,7 +186,16 @@ void QtScreenCaptureSource::handleFrame(const QImage& frame) {
 }
 
 void QtScreenCaptureSource::handleActiveChanged(const bool active) {
-    if ((active && !m_started) || active == m_active) {
+    if (active && !m_started) {
+        if (m_backend != nullptr) {
+            m_backend->stop();
+        }
+        return;
+    }
+    if (active) {
+        cancelStartupTimeout();
+    }
+    if (active == m_active) {
         return;
     }
 
@@ -188,6 +212,23 @@ void QtScreenCaptureSource::handleFailure(const QString& message) {
     m_startFailure = message.isEmpty() ? QStringLiteral("屏幕捕获失败") : message;
     stop();
     emit failed(m_startFailure);
+}
+
+void QtScreenCaptureSource::armStartupTimeout(const quint64 generation) {
+    cancelStartupTimeout();
+    m_startupTimeoutConnection = connect(&m_startupTimer, &QTimer::timeout, this,
+        [this, generation] {
+            if (generation == m_captureGeneration && m_started && !m_active) {
+                handleFailure(QStringLiteral("屏幕捕获未能启动"));
+            }
+        });
+    m_startupTimer.start();
+}
+
+void QtScreenCaptureSource::cancelStartupTimeout() {
+    m_startupTimer.stop();
+    disconnect(m_startupTimeoutConnection);
+    m_startupTimeoutConnection = {};
 }
 
 void QtScreenCaptureSource::connectScreenSignals(QScreen* screen) {

@@ -7,6 +7,8 @@
 #include <QSignalSpy>
 #include <QTest>
 
+#include <chrono>
+
 namespace {
 
 class FakeScreenCaptureBackend final : public cimbarpunk::detail::IScreenCaptureBackend {
@@ -56,6 +58,13 @@ public:
     void sendError(const QString& message) {
         if (callbacks.failed) {
             callbacks.failed(message);
+        }
+    }
+
+    void sendActive(const bool active) {
+        backendActive = active;
+        if (callbacks.activeChanged) {
+            callbacks.activeChanged(active);
         }
     }
 
@@ -213,6 +222,45 @@ private slots:
         QCOMPARE(backend->events.count(QStringLiteral("start.begin")), 1);
     }
 
+    void failsIfBackendNeverBecomesActive() {
+        FakeScreenCaptureBackend* backend = nullptr;
+        auto source = createSource(backend, std::chrono::milliseconds(10));
+        QSignalSpy failures(source.get(), &cimbarpunk::ICaptureSource::failed);
+        QSignalSpy active(source.get(), &cimbarpunk::ICaptureSource::activeChanged);
+
+        QVERIFY(source->start(testScreen(), nullptr));
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 200);
+
+        QCOMPARE(failures.at(0).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
+        QCOMPARE(active.count(), 0);
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 1);
+        QVERIFY(!backend->backendActive);
+
+        backend->sendActive(true);
+        QCoreApplication::processEvents();
+        QCOMPARE(failures.count(), 1);
+        QCOMPARE(active.count(), 0);
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 2);
+        QVERIFY(!backend->backendActive);
+    }
+
+    void oldStartupTimeoutCannotFailRestartedCaptureEarly() {
+        FakeScreenCaptureBackend* backend = nullptr;
+        auto source = createSource(backend, std::chrono::milliseconds(120));
+        QSignalSpy failures(source.get(), &cimbarpunk::ICaptureSource::failed);
+
+        QVERIFY(source->start(testScreen(), nullptr));
+        QTest::qWait(40);
+        source->stop();
+        QVERIFY(source->start(testScreen(), nullptr));
+
+        QTest::qWait(90);
+        QCOMPARE(failures.count(), 0);
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 200);
+        QCOMPARE(failures.at(0).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
+        QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 2);
+    }
+
     void ignoresDisplaySignalsAfterStop() {
         FakeScreenCaptureBackend* backend = nullptr;
         auto source = createSource(backend);
@@ -289,11 +337,13 @@ private slots:
 
 private:
     static std::unique_ptr<cimbarpunk::QtScreenCaptureSource> createSource(
-        FakeScreenCaptureBackend*& fake) {
+        FakeScreenCaptureBackend*& fake,
+        const std::chrono::milliseconds startupTimeout = std::chrono::seconds(10)) {
         auto backend = std::make_unique<FakeScreenCaptureBackend>();
         fake = backend.get();
         return std::unique_ptr<cimbarpunk::QtScreenCaptureSource>(
-            new cimbarpunk::QtScreenCaptureSource(std::move(backend)));
+            new cimbarpunk::QtScreenCaptureSource(
+                std::move(backend), startupTimeout));
     }
 };
 

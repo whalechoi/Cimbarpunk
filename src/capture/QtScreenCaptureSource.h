@@ -4,8 +4,10 @@
 #include "capture/ICaptureSource.h"
 
 #include <QMetaObject>
+#include <QTimer>
 
 #include <array>
+#include <chrono>
 #include <functional>
 #include <memory>
 
@@ -44,19 +46,26 @@ public:
 
 private:
     explicit QtScreenCaptureSource(
-        std::unique_ptr<detail::IScreenCaptureBackend> backend, QObject* parent = nullptr);
+        std::unique_ptr<detail::IScreenCaptureBackend> backend,
+        std::chrono::milliseconds startupTimeout, QObject* parent = nullptr);
 
     friend class ::QtScreenCaptureSourceTest;
 
     void handleFrame(const QImage& frame);
     void handleActiveChanged(bool active);
     void handleFailure(const QString& message);
+    void armStartupTimeout(quint64 generation);
+    void cancelStartupTimeout();
     void connectScreenSignals(QScreen* screen);
     void disconnectScreenSignals();
 
     std::unique_ptr<detail::IScreenCaptureBackend> m_backend;
     std::array<QMetaObject::Connection, 5> m_screenConnections;
+    QMetaObject::Connection m_startupTimeoutConnection;
+    QTimer m_startupTimer;
     QString m_startFailure;
+    std::chrono::milliseconds m_startupTimeout;
+    quint64 m_captureGeneration = 0;
     bool m_started = false;
     bool m_startInProgress = false;
     bool m_active = false;
