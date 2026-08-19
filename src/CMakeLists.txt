@@ -44,6 +44,30 @@ target_include_directories(cimbarpunk_output
 )
 target_link_libraries(cimbarpunk_output PUBLIC cimbarpunk_settings Qt6::Core PRIVATE zstd)
 
+add_library(cimbarpunk_decoder STATIC
+    decoder/CimbarDecoderAdapter.cpp
+    decoder/CimbarDecoderAdapter.h
+)
+target_include_directories(cimbarpunk_decoder
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE
+        ${OpenCV_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}/external/libcimbar/src/lib
+        ${PROJECT_SOURCE_DIR}/external/libcimbar/src/third_party_lib
+)
+target_compile_definitions(cimbarpunk_decoder PRIVATE ZSTD_STATIC_LINKING_ONLY)
+target_link_libraries(cimbarpunk_decoder
+    PUBLIC Qt6::Core Qt6::Gui
+    PRIVATE
+        cimb_translator
+        extractor
+        correct_static
+        wirehair
+        zstd
+        ${OpenCV_LIBS}
+)
+target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_decoder)
+
 add_library(cimbarpunk_diagnostics STATIC
     diagnostics/RotatingLogger.cpp
     diagnostics/RotatingLogger.h

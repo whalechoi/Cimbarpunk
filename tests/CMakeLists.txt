@@ -63,4 +63,33 @@ set_tests_properties(frame_pipeline PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline)
+qt_add_executable(tst_decoder integration/tst_decoder.cpp)
+target_compile_definitions(tst_decoder PRIVATE CIMBARPUNK_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cimbar")
+target_include_directories(tst_decoder PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/libcimbar/src/lib
+    ${CMAKE_SOURCE_DIR}/external/libcimbar/src/third_party_lib
+)
+target_link_libraries(tst_decoder PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME decoder COMMAND tst_decoder)
+set_tests_properties(decoder PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decoder)
+
+add_executable(generate_cimbar_fixture EXCLUDE_FROM_ALL tools/generate_cimbar_fixture.cpp)
+target_include_directories(generate_cimbar_fixture PRIVATE
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/external/libcimbar/src/lib
+    ${CMAKE_SOURCE_DIR}/external/libcimbar/src/third_party_lib
+)
+target_link_libraries(generate_cimbar_fixture PRIVATE
+    Qt6::Core
+    cimb_translator
+    extractor
+    correct_static
+    wirehair
+    zstd
+    ${OpenCV_LIBS}
+)
