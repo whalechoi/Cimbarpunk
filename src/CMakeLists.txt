@@ -77,11 +77,13 @@ target_link_libraries(cimbarpunk_diagnostics PUBLIC Qt6::Core Qt6::Gui)
 target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_diagnostics)
 
 add_library(cimbarpunk_pipeline STATIC
+    pipeline/DecodeWorker.cpp
+    pipeline/DecodeWorker.h
     pipeline/FramePipeline.cpp
     pipeline/FramePipeline.h
     pipeline/LatestFrameMailbox.cpp
     pipeline/LatestFrameMailbox.h
 )
 target_include_directories(cimbarpunk_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cimbarpunk_pipeline PUBLIC cimbarpunk_selection Qt6::Core Qt6::Gui)
+target_link_libraries(cimbarpunk_pipeline PUBLIC cimbarpunk_selection cimbarpunk_diagnostics Qt6::Core Qt6::Gui)
 target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_pipeline)

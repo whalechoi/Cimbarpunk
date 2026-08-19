@@ -63,6 +63,15 @@ set_tests_properties(frame_pipeline PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
+qt_add_executable(tst_decode_worker unit/tst_decode_worker.cpp)
+target_include_directories(tst_decode_worker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_decode_worker PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME decode_worker COMMAND tst_decode_worker)
+set_tests_properties(decode_worker PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
 qt_add_executable(tst_decoder integration/tst_decoder.cpp)
 target_compile_definitions(tst_decoder PRIVATE CIMBARPUNK_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cimbar")
 target_include_directories(tst_decoder PRIVATE
@@ -76,7 +85,7 @@ set_tests_properties(decoder PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decoder)
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_decoder)
 
 add_executable(generate_cimbar_fixture EXCLUDE_FROM_ALL tools/generate_cimbar_fixture.cpp)
 target_include_directories(generate_cimbar_fixture PRIVATE
