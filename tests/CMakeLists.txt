@@ -47,4 +47,20 @@ set_tests_properties(output_store PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store)
+qt_add_executable(tst_latest_frame_mailbox unit/tst_latest_frame_mailbox.cpp)
+target_link_libraries(tst_latest_frame_mailbox PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME latest_frame_mailbox COMMAND tst_latest_frame_mailbox)
+set_tests_properties(latest_frame_mailbox PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+qt_add_executable(tst_frame_pipeline unit/tst_frame_pipeline.cpp)
+target_link_libraries(tst_frame_pipeline PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME frame_pipeline COMMAND tst_frame_pipeline)
+set_tests_properties(frame_pipeline PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline)
