@@ -44,9 +44,11 @@ private:
     using ThreadEntry = std::function<void(std::stop_token)>;
     using ThreadLauncher = std::function<std::jthread(ThreadEntry)>;
     using BeforeAdmission = std::function<void()>;
+    using BeforeJoin = std::function<void()>;
 
     DecodeWorker(IDecoder& decoder, IOutputStore& outputStore, RotatingLogger& logger,
-        ThreadLauncher threadLauncher, BeforeAdmission beforeAdmission, QObject* parent);
+        ThreadLauncher threadLauncher, BeforeAdmission beforeAdmission, BeforeJoin beforeJoin,
+        QObject* parent);
 
     void run(std::stop_token stopToken);
 
@@ -55,6 +57,7 @@ private:
     RotatingLogger& m_logger;
     ThreadLauncher m_threadLauncher;
     BeforeAdmission m_beforeAdmission;
+    BeforeJoin m_beforeJoin;
     FramePipeline m_pipeline;
     LatestFrameMailbox m_mailbox;
     QString m_outputDirectory;

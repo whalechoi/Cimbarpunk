@@ -38,9 +38,10 @@ public:
 
     [[nodiscard]] static std::unique_ptr<DecodeWorker> createWithTestSeams(
         IDecoder& decoder, IOutputStore& outputStore, RotatingLogger& logger,
-        ThreadLauncher threadLauncher, std::function<void()> beforeAdmission) {
+        ThreadLauncher threadLauncher, std::function<void()> beforeAdmission,
+        std::function<void()> beforeJoin = {}) {
         return std::unique_ptr<DecodeWorker>(new DecodeWorker(decoder, outputStore, logger,
-            std::move(threadLauncher), std::move(beforeAdmission), nullptr));
+            std::move(threadLauncher), std::move(beforeAdmission), std::move(beforeJoin), nullptr));
     }
 
     [[nodiscard]] static bool waitUntilCancellationRequested(
@@ -272,6 +273,9 @@ private:
     std::condition_variable m_stateChanged;
     bool m_entered = false;
     bool m_released = false;
+};
+
+class AbortStopBeforeJoin final {
 };
 
 class PausableThreadLauncher final {
@@ -717,38 +721,93 @@ private slots:
         QVERIFY(outputDirectory.isValid());
         RotatingLogger logger(outputDirectory.path());
         QVERIFY(logger.install());
-        DecodeWorker worker(decoder, outputStore, logger);
+        BlockingGate handlerGate;
+        BlockingGate externalJoinGate;
+        std::atomic_bool abortExternalStop = false;
+        std::unique_ptr<DecodeWorker> worker = cimbarpunk::DecodeWorkerTestAccess::createWithTestSeams(
+            decoder, outputStore, logger,
+            [](cimbarpunk::DecodeWorkerTestAccess::ThreadEntry entry) {
+                return std::jthread(std::move(entry));
+            },
+            {},
+            [&] {
+                externalJoinGate.enterAndWait();
+                if (abortExternalStop.exchange(false, std::memory_order_acq_rel)) {
+                    throw AbortStopBeforeJoin{};
+                }
+            });
         WorkerSignalRecorder recordedSignals;
-        std::promise<void> handlerEnteredPromise;
-        std::future<void> handlerEntered = handlerEnteredPromise.get_future();
         std::promise<void> selfStopReturnedPromise;
         std::future<void> selfStopReturned = selfStopReturnedPromise.get_future();
-        QObject::connect(&worker, &DecodeWorker::progressChanged, &worker,
+        QObject::connect(worker.get(), &DecodeWorker::progressChanged, worker.get(),
             [&](const double) {
-                handlerEnteredPromise.set_value();
-                worker.stop();
+                handlerGate.enterAndWait();
+                worker->stop();
                 selfStopReturnedPromise.set_value();
             },
             Qt::DirectConnection);
-        QObject::connect(&worker, &DecodeWorker::completed, &worker,
+        QObject::connect(worker.get(), &DecodeWorker::completed, worker.get(),
             [&recordedSignals](const OutputResult& result) { recordedSignals.recordCompleted(result); },
             Qt::DirectConnection);
-        const auto stopWorker = qScopeGuard([&worker] { worker.stop(); });
+        const auto releaseGatesAndStop = qScopeGuard([&] {
+            handlerGate.release();
+            abortExternalStop.store(true, std::memory_order_release);
+            externalJoinGate.release();
+            try {
+                worker->stop();
+            } catch (const AbortStopBeforeJoin&) {
+                worker->stop();
+            }
+        });
 
         QString error;
-        QVERIFY2(worker.start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
-        worker.submitFrame(solidImage(Qt::yellow));
-        QVERIFY2(handlerEntered.wait_for(2s) == std::future_status::ready,
-            "the direct progress handler did not run");
-        QVERIFY2(selfStopReturned.wait_for(2s) == std::future_status::ready,
-            "stop() did not return normally on its own worker thread");
+        QVERIFY2(worker->start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
+        worker->submitFrame(solidImage(Qt::yellow));
+        const bool handlerEntered = handlerGate.waitUntilEntered();
 
-        worker.stop();
+        std::promise<bool> externalStopReturnedPromise;
+        std::future<bool> externalStopReturned = externalStopReturnedPromise.get_future();
+        std::jthread externalStopper([&] {
+            try {
+                worker->stop();
+                externalStopReturnedPromise.set_value(true);
+            } catch (const AbortStopBeforeJoin&) {
+                externalStopReturnedPromise.set_value(false);
+            }
+        });
+        const bool externalJoinPhaseEntered = externalJoinGate.waitUntilEntered();
+        const bool externalStopWasWaiting =
+            externalStopReturned.wait_for(0s) == std::future_status::timeout;
 
+        handlerGate.release();
+        const bool selfStopReturnedBeforeAbort =
+            selfStopReturned.wait_for(2s) == std::future_status::ready;
+        abortExternalStop.store(!selfStopReturnedBeforeAbort, std::memory_order_release);
+        externalJoinGate.release();
+        const bool externalStopReturnedInTime =
+            externalStopReturned.wait_for(2s) == std::future_status::ready;
+        const bool externalStopCompletedNormally =
+            externalStopReturnedInTime && externalStopReturned.get();
+        const bool selfStopEventuallyReturned = selfStopReturnedBeforeAbort
+            || selfStopReturned.wait_for(2s) == std::future_status::ready;
+        externalStopper.join();
+        worker->stop();
+
+        QVERIFY2(handlerEntered, "the direct progress handler did not reach its gate");
+        QVERIFY2(externalJoinPhaseEntered,
+            "the external stopper did not acquire lifecycle ownership and reach the join phase");
+        QVERIFY2(externalStopWasWaiting,
+            "the external stopper returned instead of waiting for the gated worker");
+        QVERIFY2(selfStopReturnedBeforeAbort,
+            "worker-thread stop() blocked behind the external stopper's lifecycle lock");
+        QVERIFY2(selfStopEventuallyReturned, "worker-thread stop() did not return within bounds");
+        QVERIFY2(externalStopReturnedInTime, "external stop() did not return within bounds");
+        QVERIFY2(externalStopCompletedNormally, "external stop() required test abort recovery");
         QCOMPARE(decoder.decodeCount(), std::size_t{1});
+        QCOMPARE(decoder.resetCount(), 2);
         QCOMPARE(outputStore.commitCount(), 0);
         QCOMPARE(recordedSignals.completedCount(), 0);
-        QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(worker));
+        QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(*worker));
     }
 
     void staleSubmitCannotCrossAStopRestartSessionBoundary() {
@@ -796,18 +855,23 @@ private slots:
         QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(*worker));
     }
 
-    void threadLaunchFailureRollsBackThePreparedSession() {
+    void threadLaunchFailureRollsBackAndAllowsNextSession() {
         FakeDecoder decoder;
         FakeOutputStore outputStore;
         QTemporaryDir outputDirectory;
         QVERIFY(outputDirectory.isValid());
         RotatingLogger logger(outputDirectory.path());
         QVERIFY(logger.install());
+        std::atomic_int launchAttempts = 0;
         std::unique_ptr<DecodeWorker> worker = cimbarpunk::DecodeWorkerTestAccess::createWithTestSeams(
             decoder, outputStore, logger,
-            [](cimbarpunk::DecodeWorkerTestAccess::ThreadEntry) -> std::jthread {
-                throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again),
-                    "controlled thread launch failure");
+            [&launchAttempts](cimbarpunk::DecodeWorkerTestAccess::ThreadEntry entry) -> std::jthread {
+                if (launchAttempts.fetch_add(1, std::memory_order_acq_rel) == 0) {
+                    throw std::system_error(
+                        std::make_error_code(std::errc::resource_unavailable_try_again),
+                        "controlled thread launch failure");
+                }
+                return std::jthread(std::move(entry));
             },
             {});
 
@@ -846,6 +910,22 @@ private slots:
         const QByteArray diagnostic = logFile.readAll();
         QVERIFY(diagnostic.contains("Decode worker thread launch failed"));
         QVERIFY(diagnostic.contains("controlled thread launch failure"));
+
+        error.clear();
+        QVERIFY2(worker->start(fullFrameSelection(), outputDirectory.path(), &error), qPrintable(error));
+        QCOMPARE(outputStore.prepareCount(), 2);
+        QCOMPARE(decoder.resetCount(), 3);
+        worker->submitFrame(solidImage(Qt::blue));
+        QVERIFY2(decoder.waitForDecodeCount(1),
+            "the recovered worker did not process a frame after the failed launch");
+        worker->stop();
+
+        QCOMPARE(decoder.seenColors(), std::vector<QColor>{QColor(Qt::blue)});
+        QCOMPARE(decoder.resetCount(), 4);
+        QVERIFY(cimbarpunk::DecodeWorkerTestAccess::isFullyStopped(*worker));
+        worker->stop();
+        QCOMPARE(decoder.resetCount(), 4);
+        QVERIFY(!cimbarpunk::DecodeWorkerTestAccess::hasJoinableThread(*worker));
     }
 };
 

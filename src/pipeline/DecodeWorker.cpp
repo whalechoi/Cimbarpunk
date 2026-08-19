@@ -34,17 +34,19 @@ private:
 DecodeWorker::DecodeWorker(
     IDecoder& decoder, IOutputStore& outputStore, RotatingLogger& logger, QObject* parent)
     : DecodeWorker(decoder, outputStore, logger,
-          [](ThreadEntry entry) { return std::jthread(std::move(entry)); }, {}, parent) {
+          [](ThreadEntry entry) { return std::jthread(std::move(entry)); }, {}, {}, parent) {
 }
 
 DecodeWorker::DecodeWorker(IDecoder& decoder, IOutputStore& outputStore, RotatingLogger& logger,
-    ThreadLauncher threadLauncher, BeforeAdmission beforeAdmission, QObject* parent)
+    ThreadLauncher threadLauncher, BeforeAdmission beforeAdmission, BeforeJoin beforeJoin,
+    QObject* parent)
     : IFrameProcessor(parent)
     , m_decoder(decoder)
     , m_outputStore(outputStore)
     , m_logger(logger)
     , m_threadLauncher(std::move(threadLauncher))
-    , m_beforeAdmission(std::move(beforeAdmission)) {
+    , m_beforeAdmission(std::move(beforeAdmission))
+    , m_beforeJoin(std::move(beforeJoin)) {
 }
 
 DecodeWorker::~DecodeWorker() {
@@ -155,6 +157,9 @@ void DecodeWorker::stop() {
         m_state.store(WorkerState::Stopped, std::memory_order_release);
         m_thread.request_stop();
         m_mailbox.stop();
+    }
+    if (m_beforeJoin) {
+        m_beforeJoin();
     }
     m_thread.join();
     m_decoder.reset();
