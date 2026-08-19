@@ -48,6 +48,7 @@ private:
         std::function<bool(const QUrl&)> openUrl;
         std::function<QString(const QString& caption, const QString& initialDirectory)> chooseDirectory;
         std::function<void(const QString& title, const QString& body)> showMessage;
+        std::function<bool()> supportsMessages;
     };
 
     TrayController(SettingsStore& settingsStore, PlatformOperations operations,
@@ -56,6 +57,8 @@ private:
     void openDirectory(const QString& directory);
     void chooseOutputDirectory();
     void showMessage(const QString& body);
+    [[nodiscard]] bool supportsMessages() const;
+    void clearOutcomeStatus();
     void updateMenu();
 
     SettingsStore& m_settingsStore;
@@ -70,6 +73,8 @@ private:
     QAction* m_changeDirectoryAction = nullptr;
     QAction* m_quitAction = nullptr;
     QString m_notificationDirectory;
+    QString m_outcomeStatus;
+    QString m_outcomeToolTip;
     std::optional<double> m_progress;
     bool m_captureActive = false;
 };

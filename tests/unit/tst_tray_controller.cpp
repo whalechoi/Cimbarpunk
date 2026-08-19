@@ -112,6 +112,7 @@ private slots:
                 return replacementDirectory;
             },
             .showMessage = [](const QString&, const QString&) {},
+            .supportsMessages = [] { return true; },
         };
         cimbarpunk::TrayController controller(store, std::move(operations));
         QSignalSpy startSpy(&controller, &cimbarpunk::TrayController::startCapture);
@@ -178,6 +179,7 @@ private slots:
                 notificationTitle = title;
                 notificationBody = body;
             },
+            .supportsMessages = [] { return true; },
         };
         cimbarpunk::TrayController controller(store, std::move(operations));
         const QString savedPath = directory.filePath(QStringLiteral("nested/saved.bin"));
@@ -186,10 +188,78 @@ private slots:
 
         QCOMPARE(notificationTitle, QStringLiteral("Cimbarpunk"));
         QCOMPARE(notificationBody, QStringLiteral("已保存：saved.bin"));
+        QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：空闲"));
+        QCOMPARE(controller.m_trayIcon->toolTip(), QStringLiteral("Cimbarpunk"));
         QVERIFY(QMetaObject::invokeMethod(controller.m_trayIcon.get(), "messageClicked",
             Qt::DirectConnection));
         QCOMPARE(openedUrls,
             QList<QUrl>{QUrl::fromLocalFile(QFileInfo(savedPath).absolutePath())});
+
+        controller.notifyFailure(QStringLiteral("捕获失败"));
+        QCOMPARE(notificationTitle, QStringLiteral("Cimbarpunk"));
+        QCOMPARE(notificationBody, QStringLiteral("失败：捕获失败"));
+        QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：空闲"));
+        QCOMPARE(controller.m_trayIcon->toolTip(), QStringLiteral("Cimbarpunk"));
+    }
+
+    void unsupportedSystemMessagesUseASafePersistentFallbackUntilTheNextSession() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QSettings settings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore store(settings);
+        int messageCalls = 0;
+        cimbarpunk::TrayController::PlatformOperations operations{
+            .openUrl = [](const QUrl&) { return true; },
+            .chooseDirectory = [](const QString&, const QString&) { return QString(); },
+            .showMessage = [&messageCalls](const QString&, const QString&) { ++messageCalls; },
+            .supportsMessages = [] { return false; },
+        };
+        cimbarpunk::TrayController controller(store, std::move(operations));
+
+        controller.notifySavedFile(directory.filePath(QStringLiteral("nested/saved.bin")));
+        QCOMPARE(messageCalls, 0);
+        QCOMPARE(controller.m_statusAction->text(),
+            QStringLiteral("状态：已保存 saved.bin"));
+        QCOMPARE(controller.m_trayIcon->toolTip(),
+            QStringLiteral("Cimbarpunk — 已保存 saved.bin"));
+
+        controller.setCaptureActive(false);
+        controller.setProgress(std::nullopt);
+        QCOMPARE(controller.m_statusAction->text(),
+            QStringLiteral("状态：已保存 saved.bin"));
+        QCOMPARE(controller.m_trayIcon->toolTip(),
+            QStringLiteral("Cimbarpunk — 已保存 saved.bin"));
+
+        const QString longFilename = QString(200, QLatin1Char('Z'))
+            + QStringLiteral("\nprivate.bin");
+        controller.notifySavedFile(QStringLiteral("D:/private-parent/") + longFilename);
+        QVERIFY(!controller.m_statusAction->text().contains(QStringLiteral("D:/private-parent")));
+        QVERIFY(!controller.m_statusAction->text().contains(QLatin1Char('\n')));
+        QVERIFY(!controller.m_trayIcon->toolTip().contains(QLatin1Char('\n')));
+        QVERIFY(controller.m_statusAction->text().size() <= 64);
+        QVERIFY(controller.m_trayIcon->toolTip().size() <= 96);
+
+        const QString privateDetail = QString(300, QLatin1Char('X'))
+            + QStringLiteral("\nraw backend detail");
+        controller.notifyFailure(privateDetail);
+        QCOMPARE(messageCalls, 0);
+        QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：任务失败"));
+        QCOMPARE(controller.m_trayIcon->toolTip(),
+            QStringLiteral("Cimbarpunk — 任务失败"));
+        QVERIFY(!controller.m_statusAction->text().contains(privateDetail));
+        QVERIFY(!controller.m_trayIcon->toolTip().contains(privateDetail));
+        QVERIFY(controller.m_statusAction->text().size() <= 64);
+        QVERIFY(controller.m_trayIcon->toolTip().size() <= 96);
+
+        controller.setCaptureActive(false);
+        QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：任务失败"));
+        controller.setCaptureActive(true);
+        QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：正在捕获"));
+        QCOMPARE(controller.m_trayIcon->toolTip(),
+            QStringLiteral("Cimbarpunk — 正在捕获"));
+        controller.setCaptureActive(false);
+        QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：空闲"));
+        QCOMPARE(controller.m_trayIcon->toolTip(), QStringLiteral("Cimbarpunk"));
     }
 
 private:
@@ -198,6 +268,7 @@ private:
             .openUrl = [](const QUrl&) { return true; },
             .chooseDirectory = [](const QString&, const QString&) { return QString(); },
             .showMessage = [](const QString&, const QString&) {},
+            .supportsMessages = [] { return true; },
         };
     }
 };

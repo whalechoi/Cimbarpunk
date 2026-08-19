@@ -17,6 +17,38 @@
 
 namespace cimbarpunk {
 
+namespace {
+
+QString boundedSafeText(QString text, const qsizetype maximumCharacters,
+    const QString& fallback) {
+    for (QChar& character : text) {
+        if (character.unicode() < 32 || character.unicode() == 127) {
+            character = QLatin1Char('_');
+        }
+    }
+    text = text.trimmed();
+    if (text.isEmpty()) {
+        text = fallback;
+    }
+    if (text.size() <= maximumCharacters) {
+        return text;
+    }
+
+    text.truncate(maximumCharacters - 1);
+    if (!text.isEmpty() && text.back().isHighSurrogate()) {
+        text.chop(1);
+    }
+    text.append(QChar(0x2026));
+    return text;
+}
+
+QString safeFilename(const QString& finalPath) {
+    return boundedSafeText(QFileInfo(finalPath).fileName(), 48,
+        QStringLiteral("文件"));
+}
+
+} // namespace
+
 TrayController::TrayController(SettingsStore& settingsStore, QObject* parent)
     : TrayController(settingsStore,
           PlatformOperations{
@@ -26,6 +58,7 @@ TrayController::TrayController(SettingsStore& settingsStore, QObject* parent)
                       QFileDialog::ShowDirsOnly);
               },
               .showMessage = {},
+              .supportsMessages = [] { return QSystemTrayIcon::supportsMessages(); },
           },
           parent) {
 }
@@ -80,6 +113,9 @@ void TrayController::show() {
 
 void TrayController::setCaptureActive(const bool active) {
     m_captureActive = active;
+    if (active) {
+        clearOutcomeStatus();
+    }
     if (!active) {
         m_progress.reset();
     }
@@ -98,12 +134,28 @@ void TrayController::setProgress(const std::optional<double> progress) {
 void TrayController::notifySavedFile(const QString& finalPath) {
     const QFileInfo fileInfo(finalPath);
     m_notificationDirectory = fileInfo.absolutePath();
-    showMessage(QStringLiteral("已保存：%1").arg(fileInfo.fileName()));
+    const QString filename = safeFilename(finalPath);
+    if (supportsMessages()) {
+        clearOutcomeStatus();
+        showMessage(QStringLiteral("已保存：%1").arg(filename));
+    } else {
+        m_outcomeStatus = QStringLiteral("状态：已保存 %1").arg(filename);
+        m_outcomeToolTip = QStringLiteral("Cimbarpunk — 已保存 %1").arg(filename);
+        updateMenu();
+    }
 }
 
 void TrayController::notifyFailure(const QString& message) {
     m_notificationDirectory.clear();
-    showMessage(QStringLiteral("失败：%1").arg(message));
+    if (supportsMessages()) {
+        clearOutcomeStatus();
+        showMessage(QStringLiteral("失败：%1")
+                        .arg(boundedSafeText(message, 80, QStringLiteral("任务失败"))));
+    } else {
+        m_outcomeStatus = QStringLiteral("状态：任务失败");
+        m_outcomeToolTip = QStringLiteral("Cimbarpunk — 任务失败");
+        updateMenu();
+    }
 }
 
 void TrayController::openDirectory(const QString& directory) {
@@ -133,9 +185,26 @@ void TrayController::showMessage(const QString& body) {
         QSystemTrayIcon::Information);
 }
 
+bool TrayController::supportsMessages() const {
+    return m_operations.supportsMessages ? m_operations.supportsMessages() : false;
+}
+
+void TrayController::clearOutcomeStatus() {
+    m_outcomeStatus.clear();
+    m_outcomeToolTip.clear();
+}
+
 void TrayController::updateMenu() {
-    m_statusAction->setText(m_captureActive ? QStringLiteral("状态：正在捕获")
-                                            : QStringLiteral("状态：空闲"));
+    if (m_captureActive) {
+        m_statusAction->setText(QStringLiteral("状态：正在捕获"));
+        m_trayIcon->setToolTip(QStringLiteral("Cimbarpunk — 正在捕获"));
+    } else if (!m_outcomeStatus.isEmpty()) {
+        m_statusAction->setText(m_outcomeStatus);
+        m_trayIcon->setToolTip(m_outcomeToolTip);
+    } else {
+        m_statusAction->setText(QStringLiteral("状态：空闲"));
+        m_trayIcon->setToolTip(QStringLiteral("Cimbarpunk"));
+    }
     m_startAction->setEnabled(!m_captureActive);
     m_stopAction->setVisible(m_captureActive);
     m_stopAction->setEnabled(m_captureActive);

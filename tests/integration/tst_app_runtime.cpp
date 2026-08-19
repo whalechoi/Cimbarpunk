@@ -40,6 +40,7 @@ struct FakeRuntime final {
     QList<bool> trayCaptureStates;
     QStringList notifications;
     QStringList failures;
+    QStringList diagnostics;
     int hideCount = 0;
     int cancelCount = 0;
 };
@@ -136,11 +137,57 @@ private slots:
             .finalPath = QStringLiteral("D:/decoded/finished.bin"),
         };
 
+        fake.sessionStateChanged(cimbarpunk::SessionState::Completed);
         fake.sessionCompleted(result);
         fake.sessionCompleted(result);
 
         QCOMPARE(fake.hideCount, 1);
         QCOMPARE(fake.notifications, QStringList{result.finalPath});
+        QCOMPARE(fake.diagnostics, QStringList{QStringLiteral("Decode completed")});
+    }
+
+    void rejectedStartCannotReopenTheTerminalGateOrLetAnOldTerminalAffectTheNextSession() {
+        FakeRuntime fake;
+        cimbarpunk::AppRuntime runtime(makePorts(fake));
+        const cimbarpunk::OutputResult resultA{
+            .ok = true,
+            .finalPath = QStringLiteral("D:/decoded/A.bin"),
+        };
+        const cimbarpunk::OutputResult resultB{
+            .ok = true,
+            .finalPath = QStringLiteral("D:/decoded/B.bin"),
+        };
+
+        fake.sessionStateChanged(cimbarpunk::SessionState::Completed);
+        fake.sessionCompleted(resultA);
+        fake.beginSelectionResult = false;
+        fake.trayStart();
+        fake.sessionCompleted(resultA);
+        fake.sessionFailed(QStringLiteral("late failure from A"));
+
+        QCOMPARE(fake.hideCount, 1);
+        QCOMPARE(fake.notifications, QStringList{resultA.finalPath});
+        QVERIFY(fake.failures.isEmpty());
+
+        fake.sessionStateChanged(cimbarpunk::SessionState::Idle);
+        fake.beginSelectionResult = true;
+        fake.cursorScreen = screenSentinel(0x404);
+        fake.trayStart();
+        fake.sessionStateChanged(cimbarpunk::SessionState::Selecting);
+        fake.sessionCompleted(resultA);
+        fake.sessionFailed(QStringLiteral("queued failure from A"));
+        QCOMPARE(fake.hideCount, 1);
+        QCOMPARE(fake.notifications, QStringList{resultA.finalPath});
+        QVERIFY(fake.failures.isEmpty());
+
+        fake.sessionStateChanged(cimbarpunk::SessionState::Completed);
+        fake.sessionCompleted(resultB);
+        fake.sessionCompleted(resultB);
+
+        QCOMPARE(fake.hideCount, 2);
+        QCOMPARE(fake.notifications,
+            QStringList({resultA.finalPath, resultB.finalPath}));
+        QVERIFY(fake.failures.isEmpty());
     }
 
     void stopAndOverlayCancellationUseTheSessionCancellationPath() {
@@ -159,10 +206,12 @@ private slots:
         FakeRuntime fake;
         cimbarpunk::AppRuntime runtime(makePorts(fake));
 
+        fake.sessionStateChanged(cimbarpunk::SessionState::Error);
         fake.sessionFailed(QStringLiteral("捕获失败"));
 
         QCOMPARE(fake.hideCount, 1);
         QCOMPARE(fake.failures, QStringList{QStringLiteral("捕获失败")});
+        QCOMPARE(fake.diagnostics, QStringList{QStringLiteral("Capture session failed")});
     }
 
     void quitShutsTheSessionDownBeforeCallingTheInjectedQuitOnce() {
@@ -295,6 +344,9 @@ private:
             },
             .quitApplication = [&fake] {
                 fake.events.append(QStringLiteral("application.quit"));
+            },
+            .logDiagnostic = [&fake](const QString& message) {
+                fake.diagnostics.append(message);
             },
         };
     }

@@ -188,6 +188,9 @@ AppRuntime::Ports AppRuntime::productionPorts(Production& production) {
             production.tray.notifyFailure(message);
         },
         .quitApplication = [] { QCoreApplication::quit(); },
+        .logDiagnostic = [&production](const QString& message) {
+            production.logger.write(QStringView(message));
+        },
     };
 }
 
@@ -235,10 +238,10 @@ void AppRuntime::wire() {
 }
 
 void AppRuntime::beginSelection() {
-    m_terminalHandled = false;
     if (!m_ports.beginSelection || !m_ports.beginSelection()) {
         return;
     }
+    m_terminalHandled = false;
 
     QScreen* screen = m_ports.screenAtCursor ? m_ports.screenAtCursor() : nullptr;
     if (screen == nullptr && m_ports.primaryScreen) {
@@ -282,6 +285,7 @@ void AppRuntime::acceptSelection(const ScreenSelection& selection) {
 }
 
 void AppRuntime::updateState(const SessionState state) {
+    m_sessionState = state;
     if (m_ports.setTrayCaptureActive) {
         m_ports.setTrayCaptureActive(isActiveState(state));
     }
@@ -307,10 +311,13 @@ void AppRuntime::updateProgress(const double progress) {
 }
 
 void AppRuntime::complete(const OutputResult& result) {
-    if (m_terminalHandled || !result.ok) {
+    if (m_sessionState != SessionState::Completed || m_terminalHandled || !result.ok) {
         return;
     }
     m_terminalHandled = true;
+    if (m_ports.logDiagnostic) {
+        m_ports.logDiagnostic(QStringLiteral("Decode completed"));
+    }
     if (m_ports.hideOverlay) {
         m_ports.hideOverlay();
     }
@@ -320,10 +327,13 @@ void AppRuntime::complete(const OutputResult& result) {
 }
 
 void AppRuntime::fail(const QString& message) {
-    if (m_terminalHandled) {
+    if (m_sessionState != SessionState::Error || m_terminalHandled) {
         return;
     }
     m_terminalHandled = true;
+    if (m_ports.logDiagnostic) {
+        m_ports.logDiagnostic(QStringLiteral("Capture session failed"));
+    }
     if (m_ports.hideOverlay) {
         m_ports.hideOverlay();
     }

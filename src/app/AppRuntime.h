@@ -68,6 +68,7 @@ private:
         std::function<void(const QString&)> notifySavedFile;
         std::function<void(const QString&)> notifyFailure;
         std::function<void()> quitApplication;
+        std::function<void(const QString&)> logDiagnostic;
     };
 
     class Production;
@@ -87,6 +88,7 @@ private:
 
     std::unique_ptr<Production> m_production;
     Ports m_ports;
+    SessionState m_sessionState = SessionState::Idle;
     bool m_started = false;
     bool m_terminalHandled = false;
     bool m_shutdown = false;
