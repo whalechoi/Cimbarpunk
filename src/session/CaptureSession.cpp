@@ -108,10 +108,11 @@ bool CaptureSession::confirmSelection() {
         return false;
     }
 
+    const quint64 generation = ++m_captureGeneration;
     m_outputDirectory = m_settingsStore.outputDirectory();
     const ScreenSelection selectionSnapshot = *m_selection;
     QScreen* screen = m_screenResolver ? m_screenResolver(QStringView(selectionSnapshot.screenId)) : nullptr;
-    if (m_state != SessionState::Adjusting) {
+    if (!isCurrentAttempt(generation, SessionState::Adjusting)) {
         return false;
     }
     if (screen == nullptr) {
@@ -120,29 +121,40 @@ bool CaptureSession::confirmSelection() {
     }
 
     QString startError;
-    if (!m_frameProcessor.start(selectionSnapshot, m_outputDirectory, &startError)) {
+    const bool processorStarted =
+        m_frameProcessor.start(selectionSnapshot, m_outputDirectory, &startError);
+    if (!isCurrentAttempt(generation, SessionState::Adjusting)) {
+        return false;
+    }
+    if (!processorStarted) {
         finishFailure(failureMessage(startError, QStringLiteral("无法启动解码处理")));
         return false;
     }
 
-    const quint64 generation = ++m_captureGeneration;
-    connectCapture(generation);
-    if (!transitionTo(SessionState::Capturing)) {
-        cleanup();
+    if (!isCurrentAttempt(generation, SessionState::Adjusting)) {
         return false;
     }
-    if (m_state != SessionState::Capturing || m_shutdown) {
+    connectCapture(generation);
+    if (!transitionTo(SessionState::Capturing)) {
+        if (isCurrentAttempt(generation, SessionState::Adjusting)) {
+            cleanup();
+        }
+        return false;
+    }
+    if (!isCurrentAttempt(generation, SessionState::Capturing)) {
         return false;
     }
 
     startError.clear();
-    if (!m_captureSource.start(screen, &startError)) {
-        if (m_state == SessionState::Capturing) {
-            finishFailure(failureMessage(startError, QStringLiteral("无法启动屏幕捕获")));
-        }
+    const bool captureStarted = m_captureSource.start(screen, &startError);
+    if (!isCurrentAttempt(generation, SessionState::Capturing)) {
         return false;
     }
-    return m_state == SessionState::Capturing;
+    if (!captureStarted) {
+        finishFailure(failureMessage(startError, QStringLiteral("无法启动屏幕捕获")));
+        return false;
+    }
+    return true;
 }
 
 bool CaptureSession::cancel() {
@@ -203,8 +215,13 @@ bool CaptureSession::transitionTo(const SessionState next) {
 }
 
 bool CaptureSession::isCurrentCapture(const quint64 generation) const {
-    return !m_shutdown && !m_cleaningUp && m_state == SessionState::Capturing
-        && generation == m_captureGeneration;
+    return isCurrentAttempt(generation, SessionState::Capturing);
+}
+
+bool CaptureSession::isCurrentAttempt(
+    const quint64 generation, const SessionState expectedState) const {
+    return !m_shutdown && !m_cleaningUp && generation == m_captureGeneration
+        && m_state == expectedState;
 }
 
 void CaptureSession::connectCapture(const quint64 generation) {
@@ -283,6 +300,7 @@ void CaptureSession::cleanup() {
     }
 
     m_cleaningUp = true;
+    ++m_captureGeneration;
     m_watchdogArmed = false;
     m_noFrameWatchdog.stop();
     disconnectCapture();

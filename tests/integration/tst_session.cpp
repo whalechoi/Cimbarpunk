@@ -29,16 +29,16 @@ constexpr int completed = static_cast<int>(cimbarpunk::SessionState::Completed);
 constexpr int error = static_cast<int>(cimbarpunk::SessionState::Error);
 constexpr int cancelled = static_cast<int>(cimbarpunk::SessionState::Cancelled);
 
-cimbarpunk::ScreenSelection selection() {
+cimbarpunk::ScreenSelection selection(const QString& screenId = QStringLiteral("display-A")) {
     return {
-        .screenId = QStringLiteral("display-A"),
+        .screenId = screenId,
         .screenGeometry = QRectF(-1920.0, 0.0, 1920.0, 1080.0),
         .logicalRect = QRectF(-1728.0, 108.0, 960.0, 540.0),
     };
 }
 
-QScreen* screenSentinel() {
-    return reinterpret_cast<QScreen*>(quintptr{0x1});
+QScreen* screenSentinel(const quintptr value = 0x1) {
+    return reinterpret_cast<QScreen*>(value);
 }
 
 QList<int> recordedStates(const QSignalSpy& spy) {
@@ -52,6 +52,29 @@ QList<int> recordedStates(const QSignalSpy& spy) {
 
 int occurrences(const QList<int>& values, int wanted) {
     return static_cast<int>(std::count(values.cbegin(), values.cend(), wanted));
+}
+
+bool processQueuedReturnToIdle(cimbarpunk::CaptureSession& session) {
+    if (session.state() == cimbarpunk::SessionState::Idle) {
+        return true;
+    }
+
+    QEventLoop loop;
+    QTimer bound;
+    bound.setSingleShot(true);
+    bound.setInterval(500ms);
+    const QMetaObject::Connection stateConnection = QObject::connect(
+        &session, &cimbarpunk::CaptureSession::stateChanged, &loop,
+        [&loop](const cimbarpunk::SessionState state) {
+            if (state == cimbarpunk::SessionState::Idle) {
+                loop.quit();
+            }
+        });
+    QObject::connect(&bound, &QTimer::timeout, &loop, &QEventLoop::quit);
+    bound.start();
+    loop.exec();
+    QObject::disconnect(stateConnection);
+    return session.state() == cimbarpunk::SessionState::Idle;
 }
 
 } // namespace
@@ -161,6 +184,209 @@ private slots:
         const auto persisted = settings.restoreSelection(QStringLiteral("display-A"));
         QVERIFY(persisted.has_value());
         QCOMPARE(*persisted, QRectF(0.1, 0.1, 0.5, 0.5));
+        QTRY_COMPARE(session.state(), cimbarpunk::SessionState::Idle);
+    }
+
+    void staleConfirmAfterCapturingNotificationCannotStartOrFailTheNewSession() {
+        QTemporaryDir directory;
+        QSettings rawSettings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore settings(rawSettings);
+        cimbarpunk::test::FakeCaptureSource source;
+        cimbarpunk::test::FakeFrameProcessor processor;
+        QScreen* const screenA = screenSentinel(0xA);
+        QScreen* const screenB = screenSentinel(0xB);
+        source.failingScreen = screenA;
+        cimbarpunk::CaptureSession session(source, processor, settings,
+            [=](const QStringView id) {
+                return id == QStringLiteral("display-A") ? screenA : screenB;
+            });
+        QSignalSpy failures(&session, &cimbarpunk::CaptureSession::failed);
+        bool handledA = false;
+        bool reachedNestedIdle = false;
+        bool beganB = false;
+        bool selectedB = false;
+        bool confirmedB = false;
+        connect(&session, &cimbarpunk::CaptureSession::stateChanged, &session,
+            [&](const cimbarpunk::SessionState state) {
+                if (state != cimbarpunk::SessionState::Capturing || handledA) {
+                    return;
+                }
+                handledA = true;
+                session.stop();
+                reachedNestedIdle = processQueuedReturnToIdle(session);
+                if (!reachedNestedIdle) {
+                    return;
+                }
+                beganB = session.beginSelection();
+                selectedB = session.selectionCreated(selection(QStringLiteral("display-B")));
+                confirmedB = session.confirmSelection();
+            });
+
+        QVERIFY(session.beginSelection());
+        QVERIFY(session.selectionCreated(selection()));
+        const bool confirmedA = session.confirmSelection();
+
+        QVERIFY(!confirmedA);
+        QVERIFY(reachedNestedIdle);
+        QVERIFY(beganB);
+        QVERIFY(selectedB);
+        QVERIFY(confirmedB);
+        QCOMPARE(session.state(), cimbarpunk::SessionState::Capturing);
+        QCOMPARE(failures.size(), 0);
+        QCOMPARE(source.startedScreens, QList<QScreen*>({screenB}));
+        QCOMPARE(processor.lastSelection.screenId, QStringLiteral("display-B"));
+        QVERIFY(source.active);
+        QVERIFY(processor.running);
+        QVERIFY(session.stop());
+        QTRY_COMPARE(session.state(), cimbarpunk::SessionState::Idle);
+    }
+
+    void staleConfirmAfterResolverCannotConsumeANewAdjustingSelection() {
+        QTemporaryDir directory;
+        QSettings rawSettings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore settings(rawSettings);
+        cimbarpunk::test::FakeCaptureSource source;
+        cimbarpunk::test::FakeFrameProcessor processor;
+        QScreen* const screenA = screenSentinel(0xA);
+        QScreen* const screenB = screenSentinel(0xB);
+        cimbarpunk::CaptureSession* sessionPointer = nullptr;
+        bool handledA = false;
+        bool reachedNestedIdle = false;
+        bool beganB = false;
+        bool selectedB = false;
+        cimbarpunk::CaptureSession session(source, processor, settings,
+            [&](const QStringView id) {
+                if (id == QStringLiteral("display-A") && !handledA) {
+                    handledA = true;
+                    sessionPointer->cancel();
+                    reachedNestedIdle = processQueuedReturnToIdle(*sessionPointer);
+                    if (reachedNestedIdle) {
+                        beganB = sessionPointer->beginSelection();
+                        selectedB = sessionPointer->selectionCreated(
+                            selection(QStringLiteral("display-B")));
+                    }
+                    return screenA;
+                }
+                return screenB;
+            });
+        sessionPointer = &session;
+
+        QVERIFY(session.beginSelection());
+        QVERIFY(session.selectionCreated(selection()));
+        QVERIFY(!session.confirmSelection());
+
+        QVERIFY(reachedNestedIdle);
+        QVERIFY(beganB);
+        QVERIFY(selectedB);
+        QCOMPARE(session.state(), cimbarpunk::SessionState::Adjusting);
+        QCOMPARE(processor.startCalls, 0);
+        QCOMPARE(source.startCalls, 0);
+
+        QVERIFY(session.confirmSelection());
+        QCOMPARE(source.startedScreens, QList<QScreen*>({screenB}));
+        QCOMPARE(processor.lastSelection.screenId, QStringLiteral("display-B"));
+        QVERIFY(session.stop());
+        QTRY_COMPARE(session.state(), cimbarpunk::SessionState::Idle);
+    }
+
+    void staleConfirmAfterProcessorStartCannotDisconnectOrStopTheNewCapture() {
+        QTemporaryDir directory;
+        QSettings rawSettings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore settings(rawSettings);
+        cimbarpunk::test::FakeCaptureSource source;
+        cimbarpunk::test::FakeFrameProcessor processor;
+        QScreen* const screenA = screenSentinel(0xA);
+        QScreen* const screenB = screenSentinel(0xB);
+        cimbarpunk::CaptureSession session(source, processor, settings,
+            [=](const QStringView id) {
+                return id == QStringLiteral("display-A") ? screenA : screenB;
+            });
+        bool handledA = false;
+        bool reachedNestedIdle = false;
+        bool beganB = false;
+        bool selectedB = false;
+        bool confirmedB = false;
+        processor.onStarted = [&](const cimbarpunk::ScreenSelection& startedSelection) {
+            if (startedSelection.screenId != QStringLiteral("display-A") || handledA) {
+                return;
+            }
+            handledA = true;
+            session.cancel();
+            reachedNestedIdle = processQueuedReturnToIdle(session);
+            if (!reachedNestedIdle) {
+                return;
+            }
+            beganB = session.beginSelection();
+            selectedB = session.selectionCreated(selection(QStringLiteral("display-B")));
+            confirmedB = session.confirmSelection();
+        };
+
+        QVERIFY(session.beginSelection());
+        QVERIFY(session.selectionCreated(selection()));
+        QVERIFY(!session.confirmSelection());
+
+        QVERIFY(reachedNestedIdle);
+        QVERIFY(beganB);
+        QVERIFY(selectedB);
+        QVERIFY(confirmedB);
+        QCOMPARE(session.state(), cimbarpunk::SessionState::Capturing);
+        QCOMPARE(source.startedScreens, QList<QScreen*>({screenB}));
+        QCOMPARE(processor.lastSelection.screenId, QStringLiteral("display-B"));
+        QVERIFY(source.active);
+        QVERIFY(processor.running);
+        QVERIFY(session.stop());
+        QTRY_COMPARE(session.state(), cimbarpunk::SessionState::Idle);
+    }
+
+    void staleCaptureStartFailureCannotFailTheNewCapture() {
+        QTemporaryDir directory;
+        QSettings rawSettings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore settings(rawSettings);
+        cimbarpunk::test::FakeCaptureSource source;
+        cimbarpunk::test::FakeFrameProcessor processor;
+        QScreen* const screenA = screenSentinel(0xA);
+        QScreen* const screenB = screenSentinel(0xB);
+        source.failingScreen = screenA;
+        cimbarpunk::CaptureSession session(source, processor, settings,
+            [=](const QStringView id) {
+                return id == QStringLiteral("display-A") ? screenA : screenB;
+            });
+        QSignalSpy failures(&session, &cimbarpunk::CaptureSession::failed);
+        bool handledA = false;
+        bool reachedNestedIdle = false;
+        bool beganB = false;
+        bool selectedB = false;
+        bool confirmedB = false;
+        source.onStarted = [&](QScreen* screen) {
+            if (screen != screenA || handledA) {
+                return;
+            }
+            handledA = true;
+            session.stop();
+            reachedNestedIdle = processQueuedReturnToIdle(session);
+            if (!reachedNestedIdle) {
+                return;
+            }
+            beganB = session.beginSelection();
+            selectedB = session.selectionCreated(selection(QStringLiteral("display-B")));
+            confirmedB = session.confirmSelection();
+        };
+
+        QVERIFY(session.beginSelection());
+        QVERIFY(session.selectionCreated(selection()));
+        QVERIFY(!session.confirmSelection());
+
+        QVERIFY(reachedNestedIdle);
+        QVERIFY(beganB);
+        QVERIFY(selectedB);
+        QVERIFY(confirmedB);
+        QCOMPARE(session.state(), cimbarpunk::SessionState::Capturing);
+        QCOMPARE(failures.size(), 0);
+        QCOMPARE(source.startedScreens, QList<QScreen*>({screenA, screenB}));
+        QCOMPARE(processor.lastSelection.screenId, QStringLiteral("display-B"));
+        QVERIFY(source.active);
+        QVERIFY(processor.running);
+        QVERIFY(session.stop());
         QTRY_COMPARE(session.state(), cimbarpunk::SessionState::Idle);
     }
 

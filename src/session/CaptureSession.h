@@ -53,6 +53,7 @@ signals:
 
 private:
     [[nodiscard]] bool transitionTo(SessionState next);
+    [[nodiscard]] bool isCurrentAttempt(quint64 generation, SessionState expectedState) const;
     [[nodiscard]] bool isCurrentCapture(quint64 generation) const;
     void connectCapture(quint64 generation);
     void disconnectCapture();

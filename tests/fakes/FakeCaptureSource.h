@@ -5,6 +5,8 @@
 
 #include <QStringList>
 
+#include <functional>
+
 namespace cimbarpunk::test {
 
 class FakeCaptureSource final : public ICaptureSource {
@@ -19,6 +21,7 @@ public:
     bool start(QScreen* screen, QString* error) override {
         ++startCalls;
         lastScreen = screen;
+        startedScreens.append(screen);
         record(QStringLiteral("capture.start"));
         if (!startSucceeds) {
             if (error != nullptr) {
@@ -30,6 +33,15 @@ public:
         active = true;
         if (announceActiveOnStart) {
             emit activeChanged(true);
+        }
+        if (onStarted) {
+            onStarted(screen);
+        }
+        if (screen == failingScreen) {
+            if (error != nullptr) {
+                *error = startError;
+            }
+            return false;
         }
         return true;
     }
@@ -59,11 +71,14 @@ public:
 
     bool startSucceeds = true;
     bool announceActiveOnStart = true;
+    QScreen* failingScreen = nullptr;
+    std::function<void(QScreen*)> onStarted;
     QString startError = QStringLiteral("capture start failed");
     int startCalls = 0;
     int stopCalls = 0;
     bool active = false;
     QScreen* lastScreen = nullptr;
+    QList<QScreen*> startedScreens;
 
 private:
     void record(const QString& event) {

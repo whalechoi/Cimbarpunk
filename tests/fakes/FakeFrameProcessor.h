@@ -5,6 +5,8 @@
 
 #include <QStringList>
 
+#include <functional>
+
 namespace cimbarpunk::test {
 
 class FakeFrameProcessor final : public IFrameProcessor {
@@ -29,6 +31,9 @@ public:
         }
 
         running = true;
+        if (onStarted) {
+            onStarted(selection);
+        }
         return true;
     }
 
@@ -61,6 +66,7 @@ public:
     }
 
     bool startSucceeds = true;
+    std::function<void(const ScreenSelection&)> onStarted;
     QString startError = QStringLiteral("processor start failed");
     int startCalls = 0;
     int stopCalls = 0;
