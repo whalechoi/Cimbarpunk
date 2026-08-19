@@ -87,3 +87,16 @@ add_library(cimbarpunk_pipeline STATIC
 target_include_directories(cimbarpunk_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cimbarpunk_pipeline PUBLIC cimbarpunk_selection cimbarpunk_diagnostics Qt6::Core Qt6::Gui)
 target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_pipeline)
+
+add_library(cimbarpunk_session STATIC
+    session/CaptureSession.cpp
+    session/CaptureSession.h
+)
+target_include_directories(cimbarpunk_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cimbarpunk_session PUBLIC
+    cimbarpunk_settings
+    cimbarpunk_pipeline
+    Qt6::Core
+    Qt6::Gui
+)
+target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_session)

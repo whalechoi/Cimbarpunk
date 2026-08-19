@@ -85,7 +85,20 @@ set_tests_properties(decoder PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_decoder)
+qt_add_executable(tst_session
+    integration/tst_session.cpp
+    fakes/FakeCaptureSource.h
+    fakes/FakeFrameProcessor.h
+)
+target_include_directories(tst_session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_session PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME session COMMAND tst_session)
+set_tests_properties(session PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_decoder tst_session)
 
 add_executable(generate_cimbar_fixture EXCLUDE_FROM_ALL tools/generate_cimbar_fixture.cpp)
 target_include_directories(generate_cimbar_fixture PRIVATE
