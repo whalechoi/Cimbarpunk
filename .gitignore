@@ -1,1 +1,17 @@
 .worktrees/
+/out/
+/.deps/
+/packages/
+/vcpkg_installed/
+/_CPack_Packages/
+/.vs/
+/.vscode/
+/.idea/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+.ninja_deps
+.ninja_log
+/aqtinstall.log
