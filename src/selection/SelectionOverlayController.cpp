@@ -47,6 +47,9 @@ SelectionOverlayController::~SelectionOverlayController() = default;
 void SelectionOverlayController::showForScreen(
     QScreen* screen, const std::optional<QRectF> normalizedRect) {
     if (screen == nullptr) {
+        ++m_overlayTransitionGeneration;
+        m_captureOverlayDesiredVisible = false;
+        m_focusHandbackTarget.clear();
         return;
     }
 
@@ -56,13 +59,16 @@ void SelectionOverlayController::showForScreen(
 
 void SelectionOverlayController::showForResolvedScreen(QScreen* screen, const QString& screenId,
     const QRect& geometry, const std::optional<QRectF> normalizedRect) {
+    ++m_overlayTransitionGeneration;
+    m_captureOverlayDesiredVisible = false;
+    m_focusHandbackTarget.clear();
     if (screen == nullptr || screenId.isEmpty() || !geometry.isValid()) {
         return;
     }
 
     if (QWindow* const focusWindow = QGuiApplication::focusWindow();
-        focusWindow != nullptr && focusWindow != m_view.get()) {
-        m_previousFocusWindow = focusWindow;
+        focusWindow != nullptr && focusWindow != m_view.get() && focusWindow->isVisible()) {
+        m_focusHandbackTarget = focusWindow;
     }
     m_model.endDrag();
     releaseInputGrabs();
@@ -103,6 +109,8 @@ void SelectionOverlayController::showForResolvedScreen(QScreen* screen, const QS
 }
 
 void SelectionOverlayController::enterCaptureMode() {
+    const quint64 transitionGeneration = ++m_overlayTransitionGeneration;
+    m_captureOverlayDesiredVisible = false;
     if (!m_view->isVisible() || !m_model.hasSelection()) {
         return;
     }
@@ -121,23 +129,30 @@ void SelectionOverlayController::enterCaptureMode() {
     m_view->setFlag(Qt::WindowDoesNotAcceptFocus, true);
     m_view->setScreen(screen);
     m_view->setGeometry(geometry);
-    if (m_previousFocusWindow != nullptr && m_previousFocusWindow->isVisible()) {
-        m_previousFocusWindow->requestActivate();
-    }
 
     if (m_model.normalizedRect() == QRectF(0, 0, 1, 1)) {
         return;
     }
+    m_captureOverlayDesiredVisible = true;
     QQuickView* const view = m_view.get();
-    const QPointer<QWindow> previousFocusWindow = m_previousFocusWindow;
+    const bool captureOverlayDesiredVisible = m_captureOverlayDesiredVisible;
+    const QPointer<QWindow> focusHandbackTarget = m_focusHandbackTarget;
     QMetaObject::invokeMethod(view,
-        [view, previousFocusWindow] {
-            if (view->flags().testFlag(Qt::WindowTransparentForInput)
-                && view->flags().testFlag(Qt::WindowDoesNotAcceptFocus)) {
-                view->show();
-                if (previousFocusWindow != nullptr && previousFocusWindow->isVisible()) {
-                    previousFocusWindow->requestActivate();
-                }
+        [this, view, transitionGeneration, captureOverlayDesiredVisible,
+            focusHandbackTarget] {
+            if (transitionGeneration != m_overlayTransitionGeneration
+                || !captureOverlayDesiredVisible || !m_captureOverlayDesiredVisible
+                || !m_captureMode || !view->flags().testFlag(Qt::WindowTransparentForInput)
+                || !view->flags().testFlag(Qt::WindowDoesNotAcceptFocus)) {
+                return;
+            }
+            view->show();
+            if (transitionGeneration != m_overlayTransitionGeneration
+                || !m_captureOverlayDesiredVisible || !m_captureMode) {
+                return;
+            }
+            if (focusHandbackTarget != nullptr && focusHandbackTarget->isVisible()) {
+                focusHandbackTarget->requestActivate();
             }
         },
         Qt::QueuedConnection);
@@ -173,6 +188,8 @@ void SelectionOverlayController::releaseInputGrabs() {
 }
 
 void SelectionOverlayController::hide() {
+    ++m_overlayTransitionGeneration;
+    m_captureOverlayDesiredVisible = false;
     releaseInputGrabs();
     m_view->hide();
 }

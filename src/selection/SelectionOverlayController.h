@@ -7,6 +7,7 @@
 #include <QPointer>
 #include <QRectF>
 #include <QString>
+#include <QtGlobal>
 
 #include <memory>
 #include <optional>
@@ -55,11 +56,13 @@ private:
 
     SelectionModel m_model;
     std::unique_ptr<QQuickView> m_view;
-    QPointer<QWindow> m_previousFocusWindow;
+    QPointer<QWindow> m_focusHandbackTarget;
     QString m_screenId;
+    quint64 m_overlayTransitionGeneration = 0;
     bool m_acceptEmitted = false;
     bool m_cancelEmitted = false;
     bool m_captureMode = false;
+    bool m_captureOverlayDesiredVisible = false;
 };
 
 } // namespace cimbarpunk

@@ -405,6 +405,66 @@ private slots:
         QCOMPARE(cancelled.count(), 1);
     }
 
+    void queuedPartialCaptureShowIsInvalidatedByHide() {
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+
+        controller.enterCaptureMode();
+        QVERIFY(!controller.m_view->isVisible());
+        controller.hide();
+        QCoreApplication::processEvents();
+
+        QVERIFY(!controller.m_view->isVisible());
+    }
+
+    void queuedPartialCaptureShowCannotOverrideANewerExactFullscreenCapture() {
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        QWindow oldFocusTarget;
+        oldFocusTarget.setGeometry(20, 20, 320, 240);
+        oldFocusTarget.show();
+        oldFocusTarget.requestActivate();
+        QTRY_VERIFY(oldFocusTarget.isActive());
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+        QTRY_VERIFY(controller.m_view->isActive());
+        QVERIFY(!oldFocusTarget.isActive());
+
+        controller.enterCaptureMode();
+        QVERIFY(!controller.m_view->isVisible());
+        controller.showForScreen(screen, QRectF(0, 0, 1, 1));
+        controller.enterCaptureMode();
+        QVERIFY(!oldFocusTarget.isActive());
+        QCoreApplication::processEvents();
+
+        QVERIFY(!controller.m_view->isVisible());
+        QVERIFY(!oldFocusTarget.isActive());
+    }
+
+    void aNewAdjustmentAttemptClearsAStaleFocusHandbackTarget() {
+        QScreen* screen = QGuiApplication::primaryScreen();
+        QVERIFY(screen != nullptr);
+        QWindow attemptATarget;
+        attemptATarget.setGeometry(20, 20, 320, 240);
+        attemptATarget.show();
+        attemptATarget.requestActivate();
+        QTRY_VERIFY(attemptATarget.isActive());
+        cimbarpunk::SelectionOverlayController controller;
+        controller.showForScreen(screen, QRectF(0.25, 0.25, 0.5, 0.5));
+        QTRY_VERIFY(controller.m_view->isActive());
+        QVERIFY(!attemptATarget.isActive());
+
+        controller.showForScreen(screen, QRectF(0.2, 0.2, 0.4, 0.4));
+        QTRY_VERIFY(controller.m_view->isActive());
+        QVERIFY(!attemptATarget.isActive());
+        controller.enterCaptureMode();
+        QCoreApplication::processEvents();
+
+        QVERIFY(!attemptATarget.isActive());
+    }
+
     void adjustmentToolbarUsesOnlyAFullyFittingSide_data() {
         QTest::addColumn<QRectF>("normalized");
         QTest::addColumn<QString>("side");
