@@ -6,4 +6,12 @@ set_tests_properties(version PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version)
+qt_add_executable(tst_contracts unit/tst_contracts.cpp)
+target_link_libraries(tst_contracts PRIVATE cimbarpunk_core Qt6::Core Qt6::Test)
+
+add_test(NAME contracts COMMAND tst_contracts)
+set_tests_properties(contracts PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts)
