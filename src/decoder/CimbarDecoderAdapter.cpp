@@ -62,7 +62,8 @@ public:
     DecodeUpdate decode(const QImage& rgbFrame)
     {
         DecodeUpdate update;
-        if (m_completed || rgbFrame.isNull() || rgbFrame.format() != QImage::Format_RGB888) {
+        if (m_completed || rgbFrame.isNull() || rgbFrame.format() != QImage::Format_RGB888
+            || rgbFrame.width() < 60 || rgbFrame.height() < 60) {
             return update;
         }
 

@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -58,15 +59,30 @@ bool writeFile(const QString& path, const QByteArray& contents)
 int main(int argc, char* argv[])
 {
     QCoreApplication application(argc, argv);
-    if (application.arguments().size() != 2) {
-        std::cerr << "usage: generate_cimbar_fixture <fixture-directory>\n";
+    const QStringList arguments = application.arguments();
+    std::optional<unsigned> simulatedWriteFailureFrame;
+    if (arguments.size() == 4 && arguments.at(2) == QStringLiteral("--fail-frame")) {
+        bool validFrame = false;
+        const unsigned frame = arguments.at(3).toUInt(&validFrame);
+        if (!validFrame) {
+            std::cerr << "invalid --fail-frame value\n";
+            return 2;
+        }
+        simulatedWriteFailureFrame = frame;
+    } else if (arguments.size() != 2) {
+        std::cerr << "usage: generate_cimbar_fixture <fixture-directory> [--fail-frame index]\n";
         return 2;
     }
 
-    const QDir fixtureDirectory(application.arguments().at(1));
+    const QDir fixtureDirectory(arguments.at(1));
     if (!QDir().mkpath(fixtureDirectory.absolutePath())) {
         std::cerr << "failed to create fixture directory\n";
         return 3;
+    }
+    const QString manifestPath = fixtureDirectory.filePath(QStringLiteral("manifest.json"));
+    if (QFile::exists(manifestPath) && !QFile::remove(manifestPath)) {
+        std::cerr << "failed to invalidate prior fixture manifest\n";
+        return 4;
     }
 
     const QString modeDirectoryPath = fixtureDirectory.filePath(QStringLiteral("mode68"));
@@ -90,12 +106,18 @@ int main(int argc, char* argv[])
     cimbar::Config::update(68);
     EncoderPlus encoder;
     std::vector<std::string> orderedFrames;
+    bool frameWriteFailed = false;
     const auto onFrame = [&](const cv::Mat& rgbFrame, unsigned index) {
+        if (simulatedWriteFailureFrame == index) {
+            frameWriteFailed = true;
+            return false;
+        }
         const QString filename = QStringLiteral("%1.png").arg(index, 4, 10, QLatin1Char('0'));
         const QString outputPath = modeDirectory.filePath(filename);
         cv::Mat bgrFrame;
         cv::cvtColor(rgbFrame, bgrFrame, cv::COLOR_RGB2BGR);
         if (!cv::imwrite(outputPath.toStdString(), bgrFrame)) {
+            frameWriteFailed = true;
             return false;
         }
         orderedFrames.push_back(filename.toStdString());
@@ -103,14 +125,18 @@ int main(int argc, char* argv[])
     };
 
     const unsigned generated = encoder.encode_fountain(sourcePath.toStdString(), onFrame, 16, 2.0);
+    if (frameWriteFailed) {
+        std::cerr << "failed to write encoded fixture frame\n";
+        return 7;
+    }
     if (generated != orderedFrames.size()) {
         std::cerr << "encoder callback count mismatch\n";
-        return 7;
+        return 8;
     }
     if (generated < 3) {
         std::cerr << "fixture needs at least three frames to omit two drop-safe frames; generated "
                   << generated << '\n';
-        return 8;
+        return 9;
     }
 
     QJsonArray orderedFramesJson;
@@ -129,9 +155,8 @@ int main(int argc, char* argv[])
         {QStringLiteral("orderedFrames"), orderedFramesJson},
         {QStringLiteral("dropSafeFrames"), dropSafeFramesJson},
     };
-    if (!writeFile(fixtureDirectory.filePath(QStringLiteral("manifest.json")),
-                   QJsonDocument(manifest).toJson(QJsonDocument::Indented))) {
-        return 9;
+    if (!writeFile(manifestPath, QJsonDocument(manifest).toJson(QJsonDocument::Indented))) {
+        return 10;
     }
 
     std::cout << "generated " << generated << " frames\n";

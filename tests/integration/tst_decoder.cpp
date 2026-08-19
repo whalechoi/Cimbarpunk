@@ -4,12 +4,15 @@
 #include "compression/zstd_decompressor.h"
 
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
+#include <QTemporaryDir>
 #include <QStringList>
 #include <QtTest/QTest>
 
@@ -21,6 +24,8 @@ using cimbarpunk::CimbarDecoderAdapter;
 using cimbarpunk::DecodedPayload;
 
 namespace {
+
+constexpr auto kSmallFrameChildArgument = "--decode-small-frame-child";
 
 struct Fixture {
     QString sourceSha256;
@@ -149,6 +154,42 @@ class DecoderIntegrationTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void fixtureGeneratorDoesNotPublishManifestAfterFrameWriteFailure()
+    {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString fixturePath = temporaryDirectory.filePath(QStringLiteral("cimbar"));
+        QVERIFY(QDir().mkpath(fixturePath));
+        QFile staleManifest(QDir(fixturePath).filePath(QStringLiteral("manifest.json")));
+        QVERIFY(staleManifest.open(QIODevice::WriteOnly));
+        QCOMPARE(staleManifest.write(QByteArrayLiteral("stale")), qint64{5});
+        staleManifest.close();
+
+        QProcess generator;
+        generator.start(QString::fromUtf8(CIMBARPUNK_FIXTURE_GENERATOR),
+            {fixturePath, QStringLiteral("--fail-frame"), QStringLiteral("3")});
+        QVERIFY(generator.waitForStarted());
+        QVERIFY(generator.waitForFinished(30000));
+        QCOMPARE(generator.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(generator.exitCode() != 0, generator.readAllStandardOutput().constData());
+        QVERIFY(!QFile::exists(QDir(fixturePath).filePath(QStringLiteral("manifest.json"))));
+    }
+
+    void minimumSelectionSizedFrameReturnsWithoutEnteringScannerLoop()
+    {
+        QProcess child;
+        child.start(QCoreApplication::applicationFilePath(),
+            {QString::fromLatin1(kSmallFrameChildArgument)});
+        QVERIFY(child.waitForStarted());
+        if (!child.waitForFinished(2000)) {
+            child.kill();
+            child.waitForFinished();
+            QFAIL("32x32 RGB888 decode exceeded the bounded child-process deadline");
+        }
+        QCOMPARE(child.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(child.exitCode(), 0);
+    }
+
     void orderedFramesRecoverCommittedSource()
     {
         const auto fixture = loadFixture();
@@ -214,6 +255,9 @@ private slots:
         const DecodeRun completedRun = decodeFrames(adapter, fixture->orderedFrames, false);
         QCOMPARE(completedRun.completions, 1);
         QVERIFY(completedRun.completed.has_value());
+        const auto completedSource = decompress(completedRun.completed->compressedBytes);
+        QVERIFY(completedSource.has_value());
+        QCOMPARE(sha256(*completedSource), fixture->sourceSha256);
 
         const DecodeRun ignoredRun = decodeFrames(adapter, fixture->orderedFrames, false);
         QCOMPARE(ignoredRun.completions, 0);
@@ -230,5 +274,20 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(DecoderIntegrationTest)
+int main(int argc, char* argv[])
+{
+    QCoreApplication application(argc, argv);
+    if (application.arguments().size() == 2
+        && application.arguments().at(1) == QString::fromLatin1(kSmallFrameChildArgument)) {
+        QImage frame(32, 32, QImage::Format_RGB888);
+        frame.fill(Qt::black);
+        CimbarDecoderAdapter adapter;
+        const cimbarpunk::DecodeUpdate update = adapter.decode(frame);
+        return update.recognized || update.progress.has_value() || update.completed.has_value() ? 1 : 0;
+    }
+
+    DecoderIntegrationTest test;
+    return QTest::qExec(&test, argc, argv);
+}
+
 #include "tst_decoder.moc"

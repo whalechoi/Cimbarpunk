@@ -93,3 +93,7 @@ target_link_libraries(generate_cimbar_fixture PRIVATE
     zstd
     ${OpenCV_LIBS}
 )
+target_compile_definitions(tst_decoder PRIVATE
+    CIMBARPUNK_FIXTURE_GENERATOR="$<TARGET_FILE:generate_cimbar_fixture>"
+)
+add_dependencies(tst_decoder generate_cimbar_fixture)
