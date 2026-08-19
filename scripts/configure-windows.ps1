@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WindowsBuildHelpers.psm1') -Force
 
 function Resolve-AbsoluteDirectory([string]$Name, [string]$Value) {
     if (-not [IO.Path]::IsPathFullyQualified($Value)) {
@@ -76,7 +77,9 @@ function Find-Tool([string]$Name, [string[]]$Fallbacks) {
 }
 
 function Invoke-Configure([string]$CMake, [string]$SelectedPreset) {
-    $lines = @(& $CMake --preset $SelectedPreset 2>&1)
+    # --fresh prevents an existing preset cache from silently retaining a
+    # different Qt or vcpkg root than the arguments validated above.
+    $lines = @(& $CMake --fresh --preset $SelectedPreset 2>&1)
     $exitCode = $LASTEXITCODE
     $lines | ForEach-Object { Write-Host $_ }
     return [pscustomobject]@{ ExitCode = $exitCode; Output = ($lines -join "`n") }
@@ -94,6 +97,12 @@ function Find-Pkgconf([string]$RepositoryRoot, [string]$SelectedPreset, [string]
             if ($null -ne $candidate) {
                 return $candidate.FullName
             }
+        }
+    }
+    foreach ($name in @('pkgconf.exe', 'pkg-config.exe')) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
         }
     }
     return $null
@@ -156,8 +165,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($pkgconf)) {
         throw 'OpenCV pkg-config parsing failed and no installed pkgconf.exe could be discovered for the single retry.'
     }
-    $env:PKG_CONFIG = '"' + $pkgconf + '"'
-    $env:VCPKG_KEEP_ENV_VARS = 'PKG_CONFIG'
+    Enable-CimbarpunkPkgconfRetry -Pkgconf $pkgconf
     Write-Host "Retrying configure once with pkgconf: $pkgconf"
     $retry = Invoke-Configure $cmake $Preset
     if ($retry.ExitCode -ne 0) {

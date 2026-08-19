@@ -36,6 +36,17 @@ for required in "${required_files[@]}"; do
     fi
 done
 
+expected_vcpkg_commit=9e593bb18ea69cc5095e012465dcd675a822ed0d
+if ! actual_vcpkg_commit=$(git -C "$VCPKG_ROOT" rev-parse HEAD 2>/dev/null); then
+    printf 'VCPKG_ROOT must be the fixed git checkout documented in README.md: %s\n' "$VCPKG_ROOT" >&2
+    exit 2
+fi
+if [[ $actual_vcpkg_commit != "$expected_vcpkg_commit" ]]; then
+    printf 'vcpkg commit mismatch: expected %s, found %s\n' \
+        "$expected_vcpkg_commit" "$actual_vcpkg_commit" >&2
+    exit 2
+fi
+
 for tool in cmake ninja g++; do
     command -v "$tool" >/dev/null || { printf '%s was not found in PATH\n' "$tool" >&2; exit 2; }
 done
@@ -48,4 +59,4 @@ qt_version=$($qtpaths --qt-version)
 
 repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$repository_root"
-cmake --preset linux-release
+cmake --fresh --preset linux-release

@@ -1,6 +1,6 @@
 # Third-party notices
 
-This file identifies the third-party code used to build or run Cimbarpunk M1. It is a notice, not a replacement for the corresponding license texts. Source redistributors must retain the license files that accompany each source tree. Packaged builds install this notice, Cimbarpunk's GPL-3.0-only license, and the exact `libcimbar` MPL-2.0 license under `share/licenses/cimbarpunk`.
+This file identifies the third-party code used to build or run Cimbarpunk M1. It is a notice, not a replacement for the corresponding license texts. Source redistributors must retain the license files that accompany each source tree. Packaged builds install this notice, Cimbarpunk's GPL-3.0-only license, the exact `libcimbar` MPL-2.0 license, the Qt module license/SPDX corpus, every resolved vcpkg port `copyright`, and the vendored libcimbar license/notice files under `share/licenses/cimbarpunk`.
 
 ## Direct runtime and build dependencies
 
@@ -23,12 +23,12 @@ The fixed libcimbar tree also contains the following source components. Their au
 
 | Component | Repository path | Upstream | License |
 |---|---|---|---|
-| base91 | `external/libcimbar/src/third_party_lib/base91/LICENSE` | <https://github.com/deepin-community/base91> | BSD-3-Clause |
+| base91 wrapper and embedded Base91 implementation | `external/libcimbar/src/third_party_lib/base91/LICENSE` and the complete embedded notice at the top of `base.hpp` | <https://github.com/r-lyeh-archived/base> (fixed vendored snapshot); Base91 algorithm/code notice points to Joachim Henke's <http://base91.sourceforge.net/> | The r-lyeh wrapper uses zlib/libpng-style terms; `base.hpp` additionally embeds Joachim Henke's BSD-3-Clause notice. Both texts are installed. |
 | moodycamel ConcurrentQueue | `external/libcimbar/src/third_party_lib/concurrentqueue/LICENSE.md` | <https://github.com/cameron314/concurrentqueue> | BSD-2-Clause |
 | cxxopts | `external/libcimbar/src/third_party_lib/cxxopts/LICENSE` | <https://github.com/jarro2783/cxxopts> | MIT |
 | fmt | `external/libcimbar/src/third_party_lib/fmt/LICENSE` | <https://github.com/fmtlib/fmt> | MIT |
 | intx | `external/libcimbar/src/third_party_lib/intx/LICENSE` | <https://github.com/chfast/intx> | Apache-2.0 |
-| libpopcnt | `external/libcimbar/src/third_party_lib/libpopcnt/LICENSE` | <https://github.com/kimwalisch/libpopcnt> | MIT |
+| libpopcnt | `external/libcimbar/src/third_party_lib/libpopcnt/LICENSE` | <https://github.com/kimwalisch/libpopcnt> | BSD-2-Clause |
 | PicoSHA2 | `external/libcimbar/src/third_party_lib/PicoSHA2/LICENSE` | <https://github.com/okdshin/PicoSHA2> | MIT |
 | stb | `external/libcimbar/src/third_party_lib/stb/LICENSE` | <https://github.com/nothings/stb> | MIT or public domain |
 

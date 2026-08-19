@@ -46,6 +46,8 @@ private slots:
     void windowUsesBlackBackgroundAndCentresFrames();
     void escapeClosesTheWindow();
     void invalidManifestIsRejected();
+    void unsafeFrameNameIsRejected_data();
+    void unsafeFrameNameIsRejected();
 };
 
 void FramePlayerTest::manifestOrderPlaysAtTenFpsAndLoops()
@@ -109,6 +111,36 @@ void FramePlayerTest::invalidManifestIsRejected()
     FramePlayer player(fixture.path(), &error);
     QVERIFY(!error.isEmpty());
     QVERIFY(!player.isReady());
+}
+
+void FramePlayerTest::unsafeFrameNameIsRejected_data()
+{
+    QTest::addColumn<QString>("frameName");
+    QTest::newRow("parent traversal") << QStringLiteral("../outside.png");
+    QTest::newRow("nested forward slash") << QStringLiteral("nested/frame.png");
+    QTest::newRow("nested backslash") << QStringLiteral("nested\\frame.png");
+    QTest::newRow("absolute unix") << QStringLiteral("/tmp/frame.png");
+    QTest::newRow("absolute windows") << QStringLiteral("C:/frame.png");
+    QTest::newRow("wrong extension") << QStringLiteral("frame.jpg");
+    QTest::newRow("empty stem") << QStringLiteral(".png");
+}
+
+void FramePlayerTest::unsafeFrameNameIsRejected()
+{
+    QFETCH(QString, frameName);
+    QTemporaryDir fixture;
+    QVERIFY(fixture.isValid());
+    QString jsonFrameName = frameName;
+    jsonFrameName.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    writeManifest(fixture.path(),
+                  QStringLiteral(R"({"mode":68,"orderedFrames":["%1"]})")
+                      .arg(jsonFrameName)
+                      .toUtf8());
+
+    QString error;
+    FramePlayer player(fixture.path(), &error);
+    QVERIFY(!player.isReady());
+    QVERIFY2(error.contains(QStringLiteral("safe PNG basename")), qPrintable(error));
 }
 
 QTEST_MAIN(FramePlayerTest)

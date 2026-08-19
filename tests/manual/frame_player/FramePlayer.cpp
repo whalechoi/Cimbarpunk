@@ -3,6 +3,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -107,7 +108,19 @@ bool FramePlayer::loadManifest(const QString &fixtureDirectory, QString *errorMe
             setError(errorMessage, QStringLiteral("Fixture manifest contains an invalid frame name"));
             return false;
         }
-        const QString framePath = modeDirectory.absoluteFilePath(entry.toString());
+        const QString frameName = entry.toString();
+        const QFileInfo frameInfo(frameName);
+        if (QDir::isAbsolutePath(frameName)
+            || frameName.contains(QLatin1Char('/'))
+            || frameName.contains(QLatin1Char('\\'))
+            || frameInfo.fileName() != frameName
+            || frameInfo.completeBaseName().isEmpty()
+            || frameInfo.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0) {
+            setError(errorMessage,
+                     QStringLiteral("Fixture manifest frame name must be a safe PNG basename"));
+            return false;
+        }
+        const QString framePath = modeDirectory.absoluteFilePath(frameName);
         const QPixmap frame(framePath);
         if (frame.isNull()) {
             setError(errorMessage, QStringLiteral("Cannot load fixture frame: %1").arg(framePath));

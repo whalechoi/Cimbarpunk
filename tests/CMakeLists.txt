@@ -168,6 +168,16 @@ add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selecti
 
 add_subdirectory(manual/frame_player)
 
+if(WIN32)
+    find_program(CIMBARPUNK_PWSH NAMES pwsh powershell REQUIRED)
+    add_test(NAME windows_build_helpers
+        COMMAND "${CIMBARPUNK_PWSH}" -NoProfile -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tst_windows_build_helpers.ps1"
+            -ModulePath "${PROJECT_SOURCE_DIR}/scripts/WindowsBuildHelpers.psm1"
+            -ToolPath "${CMAKE_COMMAND}"
+    )
+endif()
+
 add_executable(generate_cimbar_fixture EXCLUDE_FROM_ALL tools/generate_cimbar_fixture.cpp)
 target_include_directories(generate_cimbar_fixture PRIVATE
     ${OpenCV_INCLUDE_DIRS}
