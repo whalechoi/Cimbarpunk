@@ -39,7 +39,8 @@ set_tests_properties(rotating_logger PROPERTIES
 )
 
 qt_add_executable(tst_output_store unit/tst_output_store.cpp)
-target_link_libraries(tst_output_store PRIVATE cimbarpunk_core cimbarpunk_output Qt6::Core Qt6::Test)
+target_include_directories(tst_output_store PRIVATE ${CMAKE_SOURCE_DIR}/external/libcimbar/src/third_party_lib)
+target_link_libraries(tst_output_store PRIVATE cimbarpunk_core cimbarpunk_output Qt6::Core Qt6::Test zstd)
 
 add_test(NAME output_store COMMAND tst_output_store)
 set_tests_properties(output_store PROPERTIES

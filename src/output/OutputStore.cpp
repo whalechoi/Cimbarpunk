@@ -17,21 +17,21 @@ namespace cimbarpunk {
 namespace {
 
 bool isWindowsReservedName(const QString& filename) {
-    const QString basename = QFileInfo(filename).completeBaseName();
-    if (basename.compare(QStringLiteral("CON"), Qt::CaseInsensitive) == 0
-        || basename.compare(QStringLiteral("PRN"), Qt::CaseInsensitive) == 0
-        || basename.compare(QStringLiteral("AUX"), Qt::CaseInsensitive) == 0
-        || basename.compare(QStringLiteral("NUL"), Qt::CaseInsensitive) == 0) {
+    const QString component = filename.section(QLatin1Char('.'), 0, 0).trimmed();
+    if (component.compare(QStringLiteral("CON"), Qt::CaseInsensitive) == 0
+        || component.compare(QStringLiteral("PRN"), Qt::CaseInsensitive) == 0
+        || component.compare(QStringLiteral("AUX"), Qt::CaseInsensitive) == 0
+        || component.compare(QStringLiteral("NUL"), Qt::CaseInsensitive) == 0) {
         return true;
     }
 
-    if (basename.size() != 4) {
+    if (component.size() != 4) {
         return false;
     }
-    const QString prefix = basename.left(3).toUpper();
+    const QString prefix = component.left(3).toUpper();
     return (prefix == QStringLiteral("COM") || prefix == QStringLiteral("LPT"))
-        && basename.at(3) >= QLatin1Char('1')
-        && basename.at(3) <= QLatin1Char('9');
+        && component.at(3) >= QLatin1Char('1')
+        && component.at(3) <= QLatin1Char('9');
 }
 
 QString absoluteDirectory(const QString& directory) {

@@ -4,6 +4,8 @@
 
 #include "settings/SettingsStore.h"
 
+#include "zstd/zstd.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -47,6 +49,15 @@ QByteArray knownCompressedPayload() {
     return QByteArray::fromHex("28b52ffd60e8028d000050303132333435363738390100db5b1524");
 }
 
+QByteArray compressedPayloadFor(const QByteArray& bytes) {
+    QByteArray compressed(static_cast<qsizetype>(ZSTD_compressBound(static_cast<size_t>(bytes.size()))), Qt::Uninitialized);
+    const size_t compressedSize = ZSTD_compress(compressed.data(), static_cast<size_t>(compressed.size()),
+        bytes.constData(), static_cast<size_t>(bytes.size()), 1);
+    Q_ASSERT(!ZSTD_isError(compressedSize));
+    compressed.truncate(static_cast<qsizetype>(compressedSize));
+    return compressed;
+}
+
 } // namespace
 
 class OutputStoreTest final : public QObject {
@@ -55,6 +66,8 @@ class OutputStoreTest final : public QObject {
 private slots:
     void sanitizesUntrustedSenderNames() {
         QCOMPARE(sanitizeFilename(QStringLiteral("../CON.txt")), QString());
+        QCOMPARE(sanitizeFilename(QStringLiteral("CON.foo.bar")), QString());
+        QCOMPARE(sanitizeFilename(QStringLiteral("LPT1 .txt")), QString());
         QCOMPARE(sanitizeFilename(QStringLiteral("a<b>:c?.txt")), QStringLiteral("a_b__c_.txt"));
         QCOMPARE(sanitizeFilename(QStringLiteral("  report.  ")), QStringLiteral("  report"));
         QCOMPARE(sanitizeFilename(QStringLiteral("résumé.txt")), QStringLiteral("résumé.txt"));
@@ -228,6 +241,42 @@ private slots:
         }
         QVERIFY(result.ok);
         QCOMPARE(readFile(result.finalPath), expected);
+        QCOMPARE(settingsStore.registeredTemporaryFiles(), QStringList{});
+    }
+
+    void productionWriterPreservesBinaryLineFeeds() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString outputDirectory = temporaryDirectory.filePath(QStringLiteral("decoded"));
+        QSettings settings(temporaryDirectory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        SettingsStore settingsStore(settings);
+        settingsStore.setOutputDirectory(outputDirectory);
+        OutputStore store(settingsStore, makeLibcimbarPayloadWriter());
+        const QByteArray expected = QByteArrayLiteral("first\\nsecond\\n");
+
+        const auto result = store.commit(DecodedPayload{
+            QStringLiteral("lines.bin"), QStringLiteral("42"), compressedPayloadFor(expected)}, outputDirectory);
+
+        QVERIFY(result.ok);
+        QCOMPARE(readFile(result.finalPath), expected);
+    }
+
+    void productionWriterRejectsTruncatedTrailingFrame() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString outputDirectory = temporaryDirectory.filePath(QStringLiteral("decoded"));
+        QSettings settings(temporaryDirectory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        SettingsStore settingsStore(settings);
+        settingsStore.setOutputDirectory(outputDirectory);
+        OutputStore store(settingsStore, makeLibcimbarPayloadWriter());
+        QByteArray incompletePayload = knownCompressedPayload();
+        incompletePayload.append(QByteArray::fromHex("28b52ffd"));
+
+        const auto result = store.commit(DecodedPayload{
+            QStringLiteral("report.txt"), QStringLiteral("42"), incompletePayload}, outputDirectory);
+
+        QVERIFY(!result.ok);
+        QVERIFY(!QFile::exists(QDir(outputDirectory).filePath(QStringLiteral("report.txt"))));
         QCOMPARE(settingsStore.registeredTemporaryFiles(), QStringList{});
     }
 
