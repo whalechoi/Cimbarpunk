@@ -100,6 +100,24 @@ private slots:
         QCOMPARE(fake.events.count(QStringLiteral("overlay.show")), 1);
     }
 
+    void startWithoutAnyAvailableScreenNotifiesAndLogsOneStableFailure() {
+        FakeRuntime fake;
+        fake.cursorScreen = nullptr;
+        fake.primaryScreen = nullptr;
+        cimbarpunk::AppRuntime runtime(makePorts(fake));
+
+        fake.trayStart();
+
+        QVERIFY(fake.events.contains(QStringLiteral("screen.atCursor")));
+        QVERIFY(fake.events.contains(QStringLiteral("screen.primary")));
+        QCOMPARE(fake.cancelCount, 1);
+        QCOMPARE(fake.failures, QStringList{QStringLiteral("没有可用显示器")});
+        QCOMPARE(fake.diagnostics,
+            QStringList{QStringLiteral("Capture start failed: no available screen")});
+        QCOMPARE(fake.hideCount, 0);
+        QCOMPARE(fake.events.count(QStringLiteral("overlay.show")), 0);
+    }
+
     void overlayAcceptanceReachesTheSessionBeforeCapturePresentation() {
         FakeRuntime fake;
         cimbarpunk::AppRuntime runtime(makePorts(fake));

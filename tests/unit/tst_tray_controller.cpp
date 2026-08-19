@@ -29,6 +29,20 @@ QStringList visibleMenuEntries(const QMenu& menu) {
     return entries;
 }
 
+bool hasUnpairedSurrogate(const QStringView text) {
+    for (qsizetype index = 0; index < text.size(); ++index) {
+        if (text.at(index).isHighSurrogate()) {
+            if (index + 1 >= text.size() || !text.at(index + 1).isLowSurrogate()) {
+                return true;
+            }
+            ++index;
+        } else if (text.at(index).isLowSurrogate()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 class TrayControllerTest final : public QObject {
@@ -260,6 +274,79 @@ private slots:
         controller.setCaptureActive(false);
         QCOMPARE(controller.m_statusAction->text(), QStringLiteral("状态：空闲"));
         QCOMPARE(controller.m_trayIcon->toolTip(), QStringLiteral("Cimbarpunk"));
+    }
+
+    void senderFilenameRemovesUnicodeControlsSeparatorsAndAllPathSyntax() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QSettings settings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore store(settings);
+        QString title;
+        QString body;
+        bool supportsMessages = false;
+        cimbarpunk::TrayController::PlatformOperations operations{
+            .openUrl = [](const QUrl&) { return true; },
+            .chooseDirectory = [](const QString&, const QString&) { return QString(); },
+            .showMessage = [&title, &body](const QString& suppliedTitle,
+                               const QString& suppliedBody) {
+                title = suppliedTitle;
+                body = suppliedBody;
+            },
+            .supportsMessages = [&supportsMessages] { return supportsMessages; },
+        };
+        cimbarpunk::TrayController controller(store, std::move(operations));
+        const QString unsafeFilename = QStringLiteral(
+            "report\u202e\u2066\u2067\u2068left\u2069\u2028next\u2029-\U0001f680.bin");
+        const QString finalPath = QStringLiteral("D:\\private-root/hidden/") + unsafeFilename;
+        const QString safeFilename = QStringLiteral("report____left__next_-\U0001f680.bin");
+
+        controller.notifySavedFile(finalPath);
+
+        QCOMPARE(controller.m_statusAction->text(),
+            QStringLiteral("状态：已保存 ") + safeFilename);
+        QCOMPARE(controller.m_trayIcon->toolTip(),
+            QStringLiteral("Cimbarpunk — 已保存 ") + safeFilename);
+        for (const QChar forbidden : QStringLiteral("/\\\u202e\u2066\u2067\u2068\u2069\u2028\u2029")) {
+            QVERIFY(!controller.m_statusAction->text().contains(forbidden));
+            QVERIFY(!controller.m_trayIcon->toolTip().contains(forbidden));
+        }
+        QVERIFY(!controller.m_statusAction->text().contains(QStringLiteral("private-root")));
+        QVERIFY(!hasUnpairedSurrogate(controller.m_statusAction->text()));
+        QVERIFY(!hasUnpairedSurrogate(controller.m_trayIcon->toolTip()));
+        QVERIFY(controller.m_statusAction->text().size() <= 64);
+        QVERIFY(controller.m_trayIcon->toolTip().size() <= 96);
+
+        supportsMessages = true;
+        controller.notifySavedFile(finalPath);
+        QCOMPARE(title, QStringLiteral("Cimbarpunk"));
+        QCOMPARE(body, QStringLiteral("已保存：") + safeFilename);
+        for (const QChar forbidden : QStringLiteral("/\\\u202e\u2066\u2067\u2068\u2069\u2028\u2029")) {
+            QVERIFY(!body.contains(forbidden));
+        }
+        QVERIFY(!body.contains(QStringLiteral("private-root")));
+        QVERIFY(!hasUnpairedSurrogate(body));
+    }
+
+    void truncationKeepsAstralUnicodeValidAtTheLengthBoundary() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QSettings settings(directory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        cimbarpunk::SettingsStore store(settings);
+        cimbarpunk::TrayController::PlatformOperations operations = inertOperations();
+        operations.supportsMessages = [] { return false; };
+        cimbarpunk::TrayController controller(store, std::move(operations));
+        const QString boundaryFilename = QString(46, QLatin1Char('A'))
+            + QStringLiteral("\U0001f680tail.bin");
+
+        controller.notifySavedFile(QStringLiteral("D:/decoded/") + boundaryFilename);
+
+        QCOMPARE(controller.m_statusAction->text(),
+            QStringLiteral("状态：已保存 ") + QString(46, QLatin1Char('A'))
+                + QChar(0x2026));
+        QVERIFY(!hasUnpairedSurrogate(controller.m_statusAction->text()));
+        QVERIFY(!hasUnpairedSurrogate(controller.m_trayIcon->toolTip()));
+        QVERIFY(controller.m_statusAction->text().size() <= 64);
+        QVERIFY(controller.m_trayIcon->toolTip().size() <= 96);
     }
 
 private:

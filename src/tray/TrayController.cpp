@@ -21,12 +21,30 @@ namespace {
 
 QString boundedSafeText(QString text, const qsizetype maximumCharacters,
     const QString& fallback) {
-    for (QChar& character : text) {
-        if (character.unicode() < 32 || character.unicode() == 127) {
-            character = QLatin1Char('_');
+    QString sanitized;
+    sanitized.reserve(text.size());
+    for (qsizetype index = 0; index < text.size();) {
+        const QChar first = text.at(index);
+        const bool isPair = first.isHighSurrogate() && index + 1 < text.size()
+            && text.at(index + 1).isLowSurrogate();
+        const qsizetype codeUnits = isPair ? 2 : 1;
+        const char32_t codePoint = isPair
+            ? QChar::surrogateToUcs4(first, text.at(index + 1))
+            : first.unicode();
+        const QChar::Category category = QChar::category(codePoint);
+        const bool unsafe = codePoint == U'/' || codePoint == U'\\'
+            || category == QChar::Other_Control || category == QChar::Other_Format
+            || category == QChar::Separator_Line || category == QChar::Separator_Paragraph
+            || category == QChar::Other_Surrogate;
+        if (unsafe) {
+            sanitized.append(QLatin1Char('_'));
+        } else {
+            sanitized.append(QStringView(text).sliced(index, codeUnits));
         }
+        index += codeUnits;
     }
-    text = text.trimmed();
+
+    text = sanitized.trimmed();
     if (text.isEmpty()) {
         text = fallback;
     }
@@ -34,12 +52,22 @@ QString boundedSafeText(QString text, const qsizetype maximumCharacters,
         return text;
     }
 
-    text.truncate(maximumCharacters - 1);
-    if (!text.isEmpty() && text.back().isHighSurrogate()) {
-        text.chop(1);
+    QString bounded;
+    bounded.reserve(maximumCharacters);
+    const qsizetype payloadLimit = maximumCharacters - 1;
+    for (qsizetype index = 0; index < text.size();) {
+        const qsizetype codeUnits = text.at(index).isHighSurrogate()
+                && index + 1 < text.size() && text.at(index + 1).isLowSurrogate()
+            ? 2
+            : 1;
+        if (bounded.size() + codeUnits > payloadLimit) {
+            break;
+        }
+        bounded.append(QStringView(text).sliced(index, codeUnits));
+        index += codeUnits;
     }
-    text.append(QChar(0x2026));
-    return text;
+    bounded.append(QChar(0x2026));
+    return bounded;
 }
 
 QString safeFilename(const QString& finalPath) {

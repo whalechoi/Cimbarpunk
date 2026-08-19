@@ -251,6 +251,10 @@ void AppRuntime::beginSelection() {
         if (m_ports.cancelSession) {
             m_ports.cancelSession();
         }
+        if (m_ports.logDiagnostic) {
+            m_ports.logDiagnostic(
+                QStringLiteral("Capture start failed: no available screen"));
+        }
         if (m_ports.notifyFailure) {
             m_ports.notifyFailure(QStringLiteral("没有可用显示器"));
         }
