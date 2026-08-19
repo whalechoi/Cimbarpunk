@@ -22,6 +22,14 @@ target_include_directories(cimbarpunk_selection PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(cimbarpunk_selection PUBLIC Qt6::Core Qt6::Gui)
 target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_selection)
 
+add_library(cimbarpunk_capture STATIC
+    capture/QtScreenCaptureSource.cpp
+    capture/QtScreenCaptureSource.h
+)
+target_include_directories(cimbarpunk_capture PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cimbarpunk_capture PUBLIC Qt6::Core Qt6::Gui Qt6::Multimedia)
+target_link_libraries(cimbarpunk_core INTERFACE cimbarpunk_capture)
+
 add_library(cimbarpunk_settings STATIC
     settings/SettingsStore.cpp
     settings/SettingsStore.h
