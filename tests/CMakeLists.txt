@@ -22,4 +22,20 @@ set_tests_properties(selection_model PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
-add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model)
+qt_add_executable(tst_settings_store unit/tst_settings_store.cpp)
+target_link_libraries(tst_settings_store PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME settings_store COMMAND tst_settings_store)
+set_tests_properties(settings_store PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+qt_add_executable(tst_rotating_logger unit/tst_rotating_logger.cpp)
+target_link_libraries(tst_rotating_logger PRIVATE cimbarpunk_core Qt6::Core Qt6::Gui Qt6::Test)
+
+add_test(NAME rotating_logger COMMAND tst_rotating_logger)
+set_tests_properties(rotating_logger PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+)
+
+add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger)
