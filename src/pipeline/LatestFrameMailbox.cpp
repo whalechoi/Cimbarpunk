@@ -23,7 +23,10 @@ std::optional<QImage> LatestFrameMailbox::take() {
     QMutexLocker locker(&m_mutex);
     const quint64 generation = m_stopGeneration;
     while (!m_frame.has_value() && !m_stopped && generation == m_stopGeneration) {
+        ++m_waitingTakeCount;
+        m_waiterStateChanged.wakeAll();
         m_frameAvailable.wait(&m_mutex);
+        --m_waitingTakeCount;
     }
     if (m_stopped || generation != m_stopGeneration) {
         return std::nullopt;
