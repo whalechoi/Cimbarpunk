@@ -93,6 +93,7 @@ try {
         '--dir', $resolvedInstall,
         $application
     )
+    Assert-CimbarpunkStagedFfmpegBackend -StagingRoot $resolvedInstall
 
     foreach ($required in @(
         $application,
@@ -134,18 +135,79 @@ try {
         'QT_PLUGIN_PATH',
         'QT_QPA_PLATFORM_PLUGIN_PATH',
         'QML2_IMPORT_PATH',
-        'QML_IMPORT_PATH'
+        'QML_IMPORT_PATH',
+        'QT_MEDIA_BACKEND',
+        'CIMBARPUNK_EXPECT_FFMPEG_PLUGIN'
     )
     $savedEnvironment = @{}
     foreach ($name in $environmentNames) {
         $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     $stagedProcess = $null
+    $captureProcess = $null
+    $captureProbeDirectory = $null
     try {
-        $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+        $captureProbeSource = Join-Path $repositoryRoot 'out\build\windows-release\tst_windows_screen_capture.exe'
+        if (-not (Test-Path -LiteralPath $captureProbeSource -PathType Leaf)) {
+            throw "Windows screen-capture probe is missing: $captureProbeSource"
+        }
+        $qtTestSource = Join-Path $QtRoot 'bin\Qt6Test.dll'
+        if (-not (Test-Path -LiteralPath $qtTestSource -PathType Leaf)) {
+            throw "QtTest runtime for the isolated capture probe is missing: $qtTestSource"
+        }
+        $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
+        $captureProbeDirectory = Join-Path $temporaryRoot (
+            'cimbarpunk-staged-capture-probe-' + [Guid]::NewGuid().ToString('N'))
+        $captureProbeDirectory = [IO.Path]::GetFullPath($captureProbeDirectory)
+        if (-not $captureProbeDirectory.StartsWith(
+                $temporaryRoot + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Capture probe directory escaped the temporary root: $captureProbeDirectory"
+        }
+        New-Item -ItemType Directory -Path $captureProbeDirectory | Out-Null
+        $captureProbe = Join-Path $captureProbeDirectory 'tst_windows_screen_capture.exe'
+        $captureLog = Join-Path $captureProbeDirectory 'windows-screen-capture-staged.txt'
+        Copy-Item -LiteralPath $captureProbeSource -Destination $captureProbe
+        Copy-Item -LiteralPath $qtTestSource -Destination (Join-Path $captureProbeDirectory 'Qt6Test.dll')
+
+        $env:PATH = "$resolvedInstall;$env:SystemRoot\System32;$env:SystemRoot"
         foreach ($name in $environmentNames | Where-Object { $_ -ne 'PATH' }) {
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')
         }
+        $env:QT_PLUGIN_PATH = Join-Path $resolvedInstall 'plugins'
+        $env:CIMBARPUNK_EXPECT_FFMPEG_PLUGIN =
+            Join-Path $resolvedInstall 'plugins\multimedia\ffmpegmediaplugin.dll'
+
+        $captureProcess = Start-Process -FilePath $captureProbe `
+            -ArgumentList @('-o', ('"{0},txt"' -f $captureLog)) `
+            -WorkingDirectory $resolvedInstall `
+            -WindowStyle Hidden `
+            -PassThru
+        try {
+            if (-not $captureProcess.WaitForExit(30000)) {
+                throw 'Staged Windows screen-capture probe exceeded its 30-second deadline.'
+            }
+            if ($captureProcess.ExitCode -ne 0) {
+                $captureOutput = if (Test-Path -LiteralPath $captureLog -PathType Leaf) {
+                    Get-Content -LiteralPath $captureLog -Raw
+                }
+                else {
+                    '<no QtTest output was written>'
+                }
+                throw "Staged Windows screen-capture probe failed with exit code $($captureProcess.ExitCode):`n$captureOutput"
+            }
+        }
+        finally {
+            if ($null -ne $captureProcess -and -not $captureProcess.HasExited) {
+                Stop-Process -Id $captureProcess.Id -Force
+                $captureProcess.WaitForExit()
+            }
+        }
+        Write-Host 'Staged Windows screen capture produced a real desktop frame through the package-local FFmpeg plugin.'
+
+        $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+        [Environment]::SetEnvironmentVariable('QT_PLUGIN_PATH', $null, 'Process')
+        [Environment]::SetEnvironmentVariable('CIMBARPUNK_EXPECT_FFMPEG_PLUGIN', $null, 'Process')
         $stagedProcess = Start-Process -FilePath $application -WorkingDirectory $resolvedInstall -WindowStyle Hidden -PassThru
         try {
             Start-Sleep -Seconds 3
@@ -168,8 +230,23 @@ try {
         Write-Host 'Bounded staged launch passed with package-local Qt6Core and qsvgicon; process was force-stopped after verification.'
     }
     finally {
-        foreach ($name in $environmentNames) {
-            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+        try {
+            if ($null -ne $captureProbeDirectory -and
+                (Test-Path -LiteralPath $captureProbeDirectory -PathType Container)) {
+                $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
+                $resolvedProbeDirectory = [IO.Path]::GetFullPath($captureProbeDirectory)
+                if (-not $resolvedProbeDirectory.StartsWith(
+                        $temporaryRoot + [IO.Path]::DirectorySeparatorChar,
+                        [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Refusing to remove capture probe directory outside the temporary root: $resolvedProbeDirectory"
+                }
+                Remove-Item -LiteralPath $resolvedProbeDirectory -Recurse -Force
+            }
+        }
+        finally {
+            foreach ($name in $environmentNames) {
+                [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+            }
         }
     }
 }

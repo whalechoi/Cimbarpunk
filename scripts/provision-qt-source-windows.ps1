@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory = $true)][string]$Archive,
     [Parameter(Mandatory = $true)][string]$SourceDirectory,
     [Parameter(Mandatory = $true)][string]$BuildDirectory,
-    [Parameter(Mandatory = $true)][string]$InstallPrefix
+    [Parameter(Mandatory = $true)][string]$InstallPrefix,
+    [Parameter(Mandatory = $true)][string]$VcpkgRoot,
+    [Parameter(Mandatory = $true)][string]$FfmpegInstallRoot
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +25,8 @@ foreach ($entry in @{
     SourceDirectory = $SourceDirectory
     BuildDirectory = $BuildDirectory
     InstallPrefix = $InstallPrefix
+    VcpkgRoot = $VcpkgRoot
+    FfmpegInstallRoot = $FfmpegInstallRoot
 }.GetEnumerator()) {
     if (-not [IO.Path]::IsPathFullyQualified($entry.Value)) {
         throw "$($entry.Key) must be an absolute path: $($entry.Value)"
@@ -39,13 +43,33 @@ $Archive = [IO.Path]::GetFullPath($Archive)
 $SourceDirectory = [IO.Path]::GetFullPath($SourceDirectory)
 $BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
 $InstallPrefix = [IO.Path]::GetFullPath($InstallPrefix)
+$VcpkgRoot = [IO.Path]::GetFullPath($VcpkgRoot)
+$FfmpegInstallRoot = [IO.Path]::GetFullPath($FfmpegInstallRoot)
 foreach ($pair in @(
     @('SourceDirectory', $SourceDirectory, 'BuildDirectory', $BuildDirectory),
     @('SourceDirectory', $SourceDirectory, 'InstallPrefix', $InstallPrefix),
-    @('BuildDirectory', $BuildDirectory, 'InstallPrefix', $InstallPrefix)
+    @('BuildDirectory', $BuildDirectory, 'InstallPrefix', $InstallPrefix),
+    @('SourceDirectory', $SourceDirectory, 'FfmpegInstallRoot', $FfmpegInstallRoot),
+    @('BuildDirectory', $BuildDirectory, 'FfmpegInstallRoot', $FfmpegInstallRoot),
+    @('InstallPrefix', $InstallPrefix, 'FfmpegInstallRoot', $FfmpegInstallRoot)
 )) {
     if ((Test-SameOrAncestor $pair[1] $pair[3]) -or (Test-SameOrAncestor $pair[3] $pair[1])) {
         throw "$($pair[0]) and $($pair[2]) must be distinct, non-overlapping paths."
+    }
+}
+if (-not (Test-Path -LiteralPath $VcpkgRoot -PathType Container)) {
+    throw "VcpkgRoot does not exist or is not a directory: $VcpkgRoot"
+}
+Assert-CimbarpunkVcpkgCheckout -VcpkgRoot $VcpkgRoot
+$vcpkg = Join-Path $VcpkgRoot 'vcpkg.exe'
+if (-not (Test-Path -LiteralPath $vcpkg -PathType Leaf)) {
+    throw "Fixed vcpkg executable is missing: $vcpkg"
+}
+if (Test-Path -LiteralPath $FfmpegInstallRoot) {
+    $ffmpegRootItem = Get-Item -LiteralPath $FfmpegInstallRoot -Force
+    if (-not $ffmpegRootItem.PSIsContainer -or
+        ($ffmpegRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "FfmpegInstallRoot must be an ordinary directory: $FfmpegInstallRoot"
     }
 }
 
@@ -144,7 +168,22 @@ $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source
 $ninja = (Get-Command ninja.exe -ErrorAction Stop).Source
 Write-Host "Using CMake: $cmake"
 Write-Host "Using Ninja: $ninja"
-New-Item -ItemType Directory -Path $BuildDirectory,$InstallPrefix -Force | Out-Null
+New-Item -ItemType Directory -Path $BuildDirectory,$InstallPrefix,$FfmpegInstallRoot -Force | Out-Null
+
+$repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$ffmpegManifestRoot = Join-Path $repositoryRoot 'cmake\qt-ffmpeg'
+$ffmpegManifest = Join-Path $ffmpegManifestRoot 'vcpkg.json'
+if (-not (Test-Path -LiteralPath $ffmpegManifest -PathType Leaf)) {
+    throw "Fixed FFmpeg manifest is missing: $ffmpegManifest"
+}
+& $vcpkg install `
+    "--x-manifest-root=$ffmpegManifestRoot" `
+    "--x-install-root=$FfmpegInstallRoot" `
+    '--triplet=x64-windows' `
+    '--host-triplet=x64-windows'
+if ($LASTEXITCODE -ne 0) { throw 'Fixed FFmpeg 7.1.1 vcpkg install failed.' }
+Assert-CimbarpunkFfmpegInstallation -InstallRoot $FfmpegInstallRoot
+$ffmpegTripletRoot = Join-Path $FfmpegInstallRoot 'x64-windows'
 
 [Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $sourceParent, 'Process')
 $locationPushed = $false
@@ -164,7 +203,10 @@ try {
         '-DBUILD_qtdeclarative=ON',
         '-DBUILD_qtmultimedia=ON',
         '-DBUILD_qtsvg=ON',
-        '-DBUILD_qttools=ON'
+        '-DBUILD_qttools=ON',
+        "-DFFMPEG_DIR=$ffmpegTripletRoot",
+        '-DQT_DEPLOY_FFMPEG=ON',
+        '-DFEATURE_ffmpeg=ON'
     )
     & (Join-Path $SourceDirectory 'configure.bat') @configureArguments
     if ($LASTEXITCODE -ne 0) { throw 'Qt configure failed.' }
@@ -196,6 +238,9 @@ foreach ($required in @(
 )) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Qt SDK verification failed: $required" }
 }
+Assert-CimbarpunkQtFfmpegBackend `
+    -QtRoot $InstallPrefix `
+    -ConfigSummary (Join-Path $BuildDirectory 'config.summary')
 
 
 # Preserve the complete license corpus for every module actually installed,
@@ -222,5 +267,23 @@ foreach ($sbom in $sbomFiles) {
     New-Item -ItemType Directory -Path $moduleDestination -Force | Out-Null
     Get-ChildItem -LiteralPath $sourceLicenses -Force |
         Copy-Item -Destination $moduleDestination -Recurse -Force
+}
+
+$ffmpegShareRoot = Join-Path $ffmpegTripletRoot 'share'
+$ffmpegCopyrightFiles = @(Get-ChildItem -LiteralPath $ffmpegShareRoot -Filter 'copyright' -File -Recurse)
+if ($ffmpegCopyrightFiles.Count -eq 0) {
+    throw "FFmpeg provisioning dependency license corpus is empty: $ffmpegShareRoot"
+}
+$ffmpegLicenseDestination = Join-Path $qtLicenseRoot 'qt-ffmpeg\vcpkg'
+foreach ($sourceLicense in $ffmpegCopyrightFiles) {
+    $relativePath = $sourceLicense.FullName.Substring($ffmpegShareRoot.Length).TrimStart('\', '/')
+    $destination = Join-Path $ffmpegLicenseDestination $relativePath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+    Copy-Item -LiteralPath $sourceLicense.FullName -Destination $destination -Force
+    $sourceHash = (Get-FileHash -LiteralPath $sourceLicense.FullName -Algorithm SHA256).Hash
+    $destinationHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+    if ($sourceHash -ne $destinationHash) {
+        throw "Copied FFmpeg dependency license differs from source: $destination"
+    }
 }
 Assert-CimbarpunkQtSbomCorpus -SbomRoot (Join-Path $InstallPrefix 'sbom')

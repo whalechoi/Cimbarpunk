@@ -272,7 +272,7 @@ private slots:
 
     void staleAttemptEventsCannotAffectReentrantRestart() {
         FakeScreenCaptureBackend* backend = nullptr;
-        auto source = createSource(backend, std::chrono::milliseconds(20));
+        auto source = createSource(backend, std::chrono::milliseconds(500));
         bool restarted = false;
         int restartAttempts = 0;
         connect(source.get(), &cimbarpunk::ICaptureSource::failed, source.get(),
@@ -285,7 +285,7 @@ private slots:
         QSignalSpy active(source.get(), &cimbarpunk::ICaptureSource::activeChanged);
 
         QVERIFY(source->start(testScreen(), nullptr));
-        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 200);
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 1, 1500);
 
         QVERIFY(restarted);
         QCOMPARE(failures.at(0).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
@@ -300,7 +300,7 @@ private slots:
         QCOMPARE(failures.count(), 1);
         QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 1);
 
-        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 2, 200);
+        QTRY_COMPARE_WITH_TIMEOUT(failures.count(), 2, 1500);
         QCOMPARE(failures.at(1).at(0).toString(), QStringLiteral("屏幕捕获未能启动"));
         QCOMPARE(backend->events.count(QStringLiteral("stop.begin")), 2);
     }

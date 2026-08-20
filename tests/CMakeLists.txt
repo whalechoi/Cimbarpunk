@@ -86,6 +86,23 @@ set_tests_properties(qt_screen_capture_source PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )
 
+if(WIN32)
+    qt_add_executable(tst_windows_screen_capture integration/tst_windows_screen_capture.cpp)
+    target_link_libraries(tst_windows_screen_capture PRIVATE
+        cimbarpunk_core
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Multimedia
+        Qt6::Test
+        Qt6::Widgets
+    )
+
+    add_test(NAME windows_screen_capture COMMAND tst_windows_screen_capture)
+    set_tests_properties(windows_screen_capture PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    )
+endif()
+
 qt_add_executable(tst_selection_overlay_controller unit/tst_selection_overlay_controller.cpp)
 target_link_libraries(tst_selection_overlay_controller PRIVATE
     cimbarpunk_core
@@ -165,6 +182,9 @@ set_tests_properties(session PROPERTIES
 )
 
 add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_qt_screen_capture_source tst_selection_overlay_controller tst_tray_controller tst_app_runtime tst_decoder tst_session)
+if(WIN32)
+    add_dependencies(cimbarpunk_tests tst_windows_screen_capture)
+endif()
 
 add_subdirectory(manual/frame_player)
 
@@ -175,7 +195,7 @@ if(WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tst_windows_build_helpers.ps1"
             -ModulePath "${PROJECT_SOURCE_DIR}/scripts/WindowsBuildHelpers.psm1"
             -ToolPath "${CMAKE_COMMAND}"
-            -VcpkgRoot "$ENV{VCPKG_ROOT}"
+            -VcpkgRoot "${Z_VCPKG_ROOT_DIR}"
             -WrongRepository "${PROJECT_SOURCE_DIR}"
     )
 endif()

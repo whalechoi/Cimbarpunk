@@ -104,6 +104,140 @@ function Assert-CimbarpunkQtSbomCorpus {
     Write-Host "Verified Qt 6.8.4 SPDX provenance for $($documents.Count) module documents."
 }
 
+function Assert-CimbarpunkFfmpegInstallation {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$InstallRoot)
+
+    if (-not (Test-Path -LiteralPath $InstallRoot -PathType Container)) {
+        throw "FFmpeg install root is missing: $InstallRoot"
+    }
+    $resolvedRoot = (Resolve-Path -LiteralPath $InstallRoot).Path
+    $statusPath = Join-Path $resolvedRoot 'vcpkg\status'
+    if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) {
+        throw "FFmpeg vcpkg status file is missing: $statusPath"
+    }
+
+    $paragraphs = @((Get-Content -LiteralPath $statusPath -Raw) -split '(?:\r?\n){2,}')
+    $coreMatches = @($paragraphs | Where-Object {
+        $_ -match '(?m)^Package: ffmpeg\r?$' -and
+        $_ -notmatch '(?m)^Feature:' -and
+        $_ -match '(?m)^Version: 7\.1\.1\r?$' -and
+        $_ -match '(?m)^Port-Version: 6\r?$' -and
+        $_ -match '(?m)^Architecture: x64-windows\r?$' -and
+        $_ -match '(?m)^Status: install ok installed\r?$'
+    })
+    if ($coreMatches.Count -ne 1) {
+        throw "FFmpeg 7.1.1#6 x64-windows core status is missing or ambiguous: $statusPath"
+    }
+    $requiredFeatures = @('avcodec', 'avformat', 'swresample', 'swscale')
+    foreach ($feature in $requiredFeatures) {
+        $featureMatches = @($paragraphs | Where-Object {
+            $_ -match '(?m)^Package: ffmpeg\r?$' -and
+            $_ -match "(?m)^Feature: $([regex]::Escape($feature))\r?$" -and
+            $_ -match '(?m)^Architecture: x64-windows\r?$' -and
+            $_ -match '(?m)^Status: install ok installed\r?$'
+        })
+        if ($featureMatches.Count -ne 1) {
+            throw "FFmpeg 7.1.1#6 x64-windows status is missing or ambiguous for feature '$feature': $statusPath"
+        }
+    }
+    $installedFeatures = @($paragraphs | Where-Object {
+        $_ -match '(?m)^Package: ffmpeg\r?$' -and
+        $_ -match '(?m)^Feature: (?<feature>[^\r\n]+)\r?$' -and
+        $_ -match '(?m)^Architecture: x64-windows\r?$' -and
+        $_ -match '(?m)^Status: install ok installed\r?$'
+    } | ForEach-Object {
+        if ($_ -match '(?m)^Feature: (?<feature>[^\r\n]+)\r?$') {
+            $matches.feature
+        }
+    })
+    $featureDifference = @(Compare-Object -ReferenceObject $requiredFeatures -DifferenceObject $installedFeatures)
+    if ($installedFeatures.Count -ne $requiredFeatures.Count -or $featureDifference.Count -ne 0) {
+        throw "FFmpeg installation has unexpected or incomplete features: $($installedFeatures -join ', ')"
+    }
+
+    $tripletRoot = Join-Path $resolvedRoot 'x64-windows'
+    $requiredFiles = @(
+        'include\libavcodec\avcodec.h',
+        'share\ffmpeg\copyright'
+    )
+    foreach ($library in @('avcodec', 'avformat', 'avutil', 'swresample', 'swscale')) {
+        $requiredFiles += "lib\$library.lib"
+        $requiredFiles += "debug\lib\$library.lib"
+    }
+    foreach ($dll in @('avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')) {
+        $requiredFiles += "bin\$dll"
+        $requiredFiles += "debug\bin\$dll"
+    }
+    foreach ($relativePath in $requiredFiles) {
+        $required = Join-Path $tripletRoot $relativePath
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Required FFmpeg 7.1.1 artifact is missing: $required"
+        }
+    }
+
+    Write-Host "Verified FFmpeg 7.1.1#6 x64-windows installation: $tripletRoot"
+}
+
+function Assert-CimbarpunkQtFfmpegBackend {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$QtRoot,
+        [Parameter(Mandatory = $true)][string]$ConfigSummary
+    )
+
+    if (-not (Test-Path -LiteralPath $QtRoot -PathType Container)) {
+        throw "Qt install root is missing: $QtRoot"
+    }
+    if (-not (Test-Path -LiteralPath $ConfigSummary -PathType Leaf)) {
+        throw "Qt configure summary is missing: $ConfigSummary"
+    }
+    $summaryText = Get-Content -LiteralPath $ConfigSummary -Raw
+    if ($summaryText -notmatch '(?m)^\s*FFmpeg\s+\.+\s+yes\s*$') {
+        throw "Qt configure summary does not enable the FFmpeg multimedia backend: $ConfigSummary"
+    }
+
+    foreach ($relativePath in @(
+        'plugins\multimedia\ffmpegmediaplugin.dll',
+        'plugins\multimedia\ffmpegmediaplugind.dll',
+        'bin\avcodec-61.dll',
+        'bin\avformat-61.dll',
+        'bin\avutil-59.dll',
+        'bin\swresample-5.dll',
+        'bin\swscale-8.dll'
+    )) {
+        $required = Join-Path $QtRoot $relativePath
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Qt FFmpeg backend artifact is missing: $required"
+        }
+    }
+    Write-Host "Verified Qt FFmpeg multimedia backend: $QtRoot"
+}
+
+function Assert-CimbarpunkStagedFfmpegBackend {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$StagingRoot)
+
+    if (-not (Test-Path -LiteralPath $StagingRoot -PathType Container)) {
+        throw "Staging root is missing: $StagingRoot"
+    }
+    $resolvedRoot = (Resolve-Path -LiteralPath $StagingRoot).Path
+    foreach ($relativePath in @(
+        'plugins\multimedia\ffmpegmediaplugin.dll',
+        'avcodec-61.dll',
+        'avformat-61.dll',
+        'avutil-59.dll',
+        'swresample-5.dll',
+        'swscale-8.dll'
+    )) {
+        $required = Join-Path $resolvedRoot $relativePath
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Staged FFmpeg screen-capture backend artifact is missing: $required"
+        }
+    }
+    Write-Host "Verified staged FFmpeg screen-capture backend: $resolvedRoot"
+}
+
 function Enable-CimbarpunkPkgconfRetry {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Pkgconf)
@@ -121,4 +255,4 @@ function Enable-CimbarpunkPkgconfRetry {
     Write-Host "Using pkg-config retry tool: $Pkgconf ($($version[0]))"
 }
 
-Export-ModuleMember -Function Enable-CimbarpunkPkgconfRetry, Assert-CimbarpunkVcpkgCheckout, Remove-CimbarpunkStagingDirectory, Assert-CimbarpunkQtSbomCorpus
+Export-ModuleMember -Function Enable-CimbarpunkPkgconfRetry, Assert-CimbarpunkVcpkgCheckout, Remove-CimbarpunkStagingDirectory, Assert-CimbarpunkQtSbomCorpus, Assert-CimbarpunkFfmpegInstallation, Assert-CimbarpunkQtFfmpegBackend, Assert-CimbarpunkStagedFfmpegBackend

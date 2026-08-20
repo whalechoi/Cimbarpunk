@@ -244,6 +244,30 @@ private slots:
         QCOMPARE(settingsStore.registeredTemporaryFiles(), QStringList{});
     }
 
+    void productionWriterAcceptsCompleteSkippablePaddingFrame() {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString outputDirectory = temporaryDirectory.filePath(QStringLiteral("decoded"));
+        QSettings settings(temporaryDirectory.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+        SettingsStore settingsStore(settings);
+        settingsStore.setOutputDirectory(outputDirectory);
+        OutputStore store(settingsStore, makeLibcimbarPayloadWriter());
+        QByteArray paddedPayload = knownCompressedPayload();
+        paddedPayload.append(
+            QByteArray::fromHex("502a4d180c000000000000000000000000000000"));
+
+        const auto result = store.commit(DecodedPayload{
+            QStringLiteral("report.txt"), QStringLiteral("42"), paddedPayload}, outputDirectory);
+
+        QByteArray expected;
+        for (int index = 0; index < 100; ++index) {
+            expected.append(QByteArrayLiteral("0123456789"));
+        }
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(readFile(result.finalPath), expected);
+        QCOMPARE(settingsStore.registeredTemporaryFiles(), QStringList{});
+    }
+
     void productionWriterPreservesBinaryLineFeeds() {
         QTemporaryDir temporaryDirectory;
         QVERIFY(temporaryDirectory.isValid());

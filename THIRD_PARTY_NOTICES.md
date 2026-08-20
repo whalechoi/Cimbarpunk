@@ -7,6 +7,7 @@ This file identifies the third-party code used to build or run Cimbarpunk M1. It
 | Component | Fixed source / version | Source | License |
 |---|---|---|---|
 | Qt | 6.8.4 exact; modules Core, Gui, Widgets, Quick, Qml, Multimedia, Svg, Test and their Qt-declared module dependencies | <https://download.qt.io/official_releases/qt/6.8/6.8.4/single/> | GNU LGPL-3.0-only or GNU GPL-2.0-only/GPL-3.0-only, depending on module/file; see the Qt source `LICENSES/` directory and <https://www.qt.io/licensing/open-source-lgpl-obligations> |
+| FFmpeg | vcpkg `7.1.1#6`, dynamically linked; only `avcodec`, `avformat`, `swresample`, and `swscale` features are enabled for Qt's Windows screen-capture backend | <https://ffmpeg.org/> | This configuration excludes GPL/nonfree/version3 features and is LGPL-2.1-or-later; the exact vcpkg `copyright` text is installed with the package |
 | libcimbar | Git commit `c509e0bb142bfd20e22583fb96f520e8083f3fba` | <https://github.com/sz3/libcimbar> | Mozilla Public License 2.0; exact text installed as `libcimbar-MPL-2.0.txt` |
 | OpenCV | vcpkg `opencv4` resolved by baseline `9e593bb18ea69cc5095e012465dcd675a822ed0d` (Windows M1 resolution: 4.12.0#7) | <https://github.com/opencv/opencv> and <https://github.com/opencv/opencv_contrib> | Apache-2.0; individual third-party files retain their own notices |
 | Zstandard | Source vendored by the fixed libcimbar commit | <https://github.com/facebook/zstd> | BSD-3-Clause or GPL-2.0-only; Cimbarpunk builds the BSD-licensed library sources (`external/libcimbar/src/third_party_lib/zstd/LICENSE`) |

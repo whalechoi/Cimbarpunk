@@ -1,0 +1,24 @@
+{
+  "name": "cimbarpunk-qt-ffmpeg",
+  "version-string": "7.1.1",
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "avformat",
+        "swresample",
+        "swscale"
+      ]
+    }
+  ],
+  "overrides": [
+    {
+      "name": "ffmpeg",
+      "version": "7.1.1",
+      "port-version": 6
+    }
+  ]
+}

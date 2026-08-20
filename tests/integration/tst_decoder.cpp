@@ -26,6 +26,7 @@ using cimbarpunk::DecodedPayload;
 namespace {
 
 constexpr auto kSmallFrameChildArgument = "--decode-small-frame-child";
+constexpr auto kBlankFrameChildArgument = "--decode-blank-frame-child";
 
 struct Fixture {
     QString sourceSha256;
@@ -190,6 +191,21 @@ private slots:
         QCOMPARE(child.exitCode(), 0);
     }
 
+    void largeBlankFrameReturnsWithoutBlockingTheDecodeWorker()
+    {
+        QProcess child;
+        child.start(QCoreApplication::applicationFilePath(),
+            {QString::fromLatin1(kBlankFrameChildArgument)});
+        QVERIFY(child.waitForStarted());
+        if (!child.waitForFinished(2000)) {
+            child.kill();
+            child.waitForFinished();
+            QFAIL("1024x1024 blank RGB888 decode exceeded the bounded child-process deadline");
+        }
+        QCOMPARE(child.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(child.exitCode(), 0);
+    }
+
     void orderedFramesRecoverCommittedSource()
     {
         const auto fixture = loadFixture();
@@ -285,7 +301,14 @@ int main(int argc, char* argv[])
         const cimbarpunk::DecodeUpdate update = adapter.decode(frame);
         return update.recognized || update.progress.has_value() || update.completed.has_value() ? 1 : 0;
     }
-
+    if (application.arguments().size() == 2
+        && application.arguments().at(1) == QString::fromLatin1(kBlankFrameChildArgument)) {
+        QImage frame(1024, 1024, QImage::Format_RGB888);
+        frame.fill(Qt::black);
+        CimbarDecoderAdapter adapter;
+        const cimbarpunk::DecodeUpdate update = adapter.decode(frame);
+        return update.recognized || update.progress.has_value() || update.completed.has_value() ? 1 : 0;
+    }
     DecoderIntegrationTest test;
     return QTest::qExec(&test, argc, argv);
 }

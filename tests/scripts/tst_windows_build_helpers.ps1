@@ -81,6 +81,163 @@ PackageDownloadLocation: git://example.invalid/outer.git@deadbeef
         throw 'A Qt SPDX document contaminated by an outer git repository was accepted.'
     }
 
+    $goodFfmpegRoot = Join-Path $temporaryRoot 'good-ffmpeg'
+    $ffmpegTripletRoot = Join-Path $goodFfmpegRoot 'x64-windows'
+    foreach ($directory in @(
+        (Join-Path $goodFfmpegRoot 'vcpkg'),
+        (Join-Path $ffmpegTripletRoot 'include\libavcodec'),
+        (Join-Path $ffmpegTripletRoot 'lib'),
+        (Join-Path $ffmpegTripletRoot 'bin'),
+        (Join-Path $ffmpegTripletRoot 'debug\lib'),
+        (Join-Path $ffmpegTripletRoot 'debug\bin'),
+        (Join-Path $ffmpegTripletRoot 'share\ffmpeg')
+    )) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    $statusParagraphs = @(
+        @('Package: ffmpeg', 'Version: 7.1.1', 'Port-Version: 6', 'Architecture: x64-windows', 'Status: install ok installed'),
+        @('Package: ffmpeg', 'Feature: avcodec', 'Architecture: x64-windows', 'Status: install ok installed'),
+        @('Package: ffmpeg', 'Feature: avformat', 'Architecture: x64-windows', 'Status: install ok installed'),
+        @('Package: ffmpeg', 'Feature: swresample', 'Architecture: x64-windows', 'Status: install ok installed'),
+        @('Package: ffmpeg', 'Feature: swscale', 'Architecture: x64-windows', 'Status: install ok installed')
+    )
+    $statusText = ($statusParagraphs | ForEach-Object { $_ -join "`n" }) -join "`n`n"
+    Set-Content -LiteralPath (Join-Path $goodFfmpegRoot 'vcpkg\status') -Value $statusText -NoNewline
+    Set-Content -LiteralPath (Join-Path $ffmpegTripletRoot 'include\libavcodec\avcodec.h') -Value 'fixture' -NoNewline
+    foreach ($library in @('avcodec', 'avformat', 'avutil', 'swresample', 'swscale')) {
+        Set-Content -LiteralPath (Join-Path $ffmpegTripletRoot "lib\$library.lib") -Value 'release' -NoNewline
+        Set-Content -LiteralPath (Join-Path $ffmpegTripletRoot "debug\lib\$library.lib") -Value 'debug' -NoNewline
+    }
+    foreach ($dll in @('avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')) {
+        Set-Content -LiteralPath (Join-Path $ffmpegTripletRoot "bin\$dll") -Value 'release' -NoNewline
+        Set-Content -LiteralPath (Join-Path $ffmpegTripletRoot "debug\bin\$dll") -Value 'debug' -NoNewline
+    }
+    Set-Content -LiteralPath (Join-Path $ffmpegTripletRoot 'share\ffmpeg\copyright') -Value 'fixture license' -NoNewline
+    Assert-CimbarpunkFfmpegInstallation -InstallRoot $goodFfmpegRoot
+
+    $wrongFfmpegRoot = Join-Path $temporaryRoot 'wrong-ffmpeg-version'
+    Copy-Item -LiteralPath $goodFfmpegRoot -Destination $wrongFfmpegRoot -Recurse
+    $wrongStatus = (Get-Content -LiteralPath (Join-Path $wrongFfmpegRoot 'vcpkg\status') -Raw).Replace('7.1.1', '8.1.2')
+    Set-Content -LiteralPath (Join-Path $wrongFfmpegRoot 'vcpkg\status') -Value $wrongStatus -NoNewline
+    $wrongFfmpegRejected = $false
+    try {
+        Assert-CimbarpunkFfmpegInstallation -InstallRoot $wrongFfmpegRoot
+    }
+    catch {
+        $wrongFfmpegRejected = $true
+    }
+    if (-not $wrongFfmpegRejected) {
+        throw 'An FFmpeg installation at the wrong version was accepted.'
+    }
+
+    $unexpectedFeatureRoot = Join-Path $temporaryRoot 'unexpected-ffmpeg-feature'
+    Copy-Item -LiteralPath $goodFfmpegRoot -Destination $unexpectedFeatureRoot -Recurse
+    $unexpectedStatusPath = Join-Path $unexpectedFeatureRoot 'vcpkg\status'
+    $unexpectedStatus = (Get-Content -LiteralPath $unexpectedStatusPath -Raw).TrimEnd() + "`n`n" + @'
+Package: ffmpeg
+Feature: gpl
+Architecture: x64-windows
+Status: install ok installed
+'@
+    Set-Content -LiteralPath $unexpectedStatusPath -Value $unexpectedStatus -NoNewline
+    $unexpectedFeatureRejected = $false
+    try {
+        Assert-CimbarpunkFfmpegInstallation -InstallRoot $unexpectedFeatureRoot
+    }
+    catch {
+        $unexpectedFeatureRejected = $true
+    }
+    if (-not $unexpectedFeatureRejected) {
+        throw 'An FFmpeg installation with an unexpected feature was accepted.'
+    }
+
+    $incompleteFfmpegRoot = Join-Path $temporaryRoot 'incomplete-ffmpeg'
+    Copy-Item -LiteralPath $goodFfmpegRoot -Destination $incompleteFfmpegRoot -Recurse
+    Remove-Item -LiteralPath (Join-Path $incompleteFfmpegRoot 'x64-windows\bin\avcodec-61.dll') -Force
+    $incompleteFfmpegRejected = $false
+    try {
+        Assert-CimbarpunkFfmpegInstallation -InstallRoot $incompleteFfmpegRoot
+    }
+    catch {
+        $incompleteFfmpegRejected = $true
+    }
+    if (-not $incompleteFfmpegRejected) {
+        throw 'An FFmpeg installation missing a required runtime DLL was accepted.'
+    }
+
+    $goodQtFfmpegRoot = Join-Path $temporaryRoot 'good-qt-ffmpeg'
+    $qtMultimediaPlugins = Join-Path $goodQtFfmpegRoot 'plugins\multimedia'
+    $qtBin = Join-Path $goodQtFfmpegRoot 'bin'
+    New-Item -ItemType Directory -Path $qtMultimediaPlugins,$qtBin -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $qtMultimediaPlugins 'ffmpegmediaplugin.dll') -Value 'release' -NoNewline
+    Set-Content -LiteralPath (Join-Path $qtMultimediaPlugins 'ffmpegmediaplugind.dll') -Value 'debug' -NoNewline
+    foreach ($dll in @('avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')) {
+        Set-Content -LiteralPath (Join-Path $qtBin $dll) -Value 'runtime' -NoNewline
+    }
+    $goodSummary = Join-Path $temporaryRoot 'good-config.summary'
+    Set-Content -LiteralPath $goodSummary -Value @'
+Qt Multimedia:
+  Plugin:
+    FFmpeg ............................... yes
+    Windows Media Foundation ............. yes
+'@
+    Assert-CimbarpunkQtFfmpegBackend -QtRoot $goodQtFfmpegRoot -ConfigSummary $goodSummary
+
+    $badSummary = Join-Path $temporaryRoot 'bad-config.summary'
+    Set-Content -LiteralPath $badSummary -Value @'
+Qt Multimedia:
+  Plugin:
+    FFmpeg ............................... no
+    Windows Media Foundation ............. yes
+'@
+    $disabledQtFfmpegRejected = $false
+    try {
+        Assert-CimbarpunkQtFfmpegBackend -QtRoot $goodQtFfmpegRoot -ConfigSummary $badSummary
+    }
+    catch {
+        $disabledQtFfmpegRejected = $true
+    }
+    if (-not $disabledQtFfmpegRejected) {
+        throw 'A Qt build with FFmpeg disabled was accepted.'
+    }
+
+    $incompleteQtFfmpegRoot = Join-Path $temporaryRoot 'incomplete-qt-ffmpeg'
+    Copy-Item -LiteralPath $goodQtFfmpegRoot -Destination $incompleteQtFfmpegRoot -Recurse
+    Remove-Item -LiteralPath (Join-Path $incompleteQtFfmpegRoot 'plugins\multimedia\ffmpegmediaplugind.dll') -Force
+    $incompleteQtFfmpegRejected = $false
+    try {
+        Assert-CimbarpunkQtFfmpegBackend -QtRoot $incompleteQtFfmpegRoot -ConfigSummary $goodSummary
+    }
+    catch {
+        $incompleteQtFfmpegRejected = $true
+    }
+    if (-not $incompleteQtFfmpegRejected) {
+        throw 'A Qt SDK missing the Debug FFmpeg plugin was accepted.'
+    }
+
+    $goodStagedFfmpegRoot = Join-Path $temporaryRoot 'good-staged-ffmpeg'
+    $stagedMultimediaPlugins = Join-Path $goodStagedFfmpegRoot 'plugins\multimedia'
+    New-Item -ItemType Directory -Path $stagedMultimediaPlugins -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $stagedMultimediaPlugins 'ffmpegmediaplugin.dll') -Value 'release' -NoNewline
+    foreach ($dll in @('avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')) {
+        Set-Content -LiteralPath (Join-Path $goodStagedFfmpegRoot $dll) -Value 'runtime' -NoNewline
+    }
+    Assert-CimbarpunkStagedFfmpegBackend -StagingRoot $goodStagedFfmpegRoot
+
+    $incompleteStagedFfmpegRoot = Join-Path $temporaryRoot 'incomplete-staged-ffmpeg'
+    Copy-Item -LiteralPath $goodStagedFfmpegRoot -Destination $incompleteStagedFfmpegRoot -Recurse
+    Remove-Item -LiteralPath (Join-Path $incompleteStagedFfmpegRoot 'swscale-8.dll') -Force
+    $incompleteStagedFfmpegRejected = $false
+    try {
+        Assert-CimbarpunkStagedFfmpegBackend -StagingRoot $incompleteStagedFfmpegRoot
+    }
+    catch {
+        $incompleteStagedFfmpegRejected = $true
+    }
+    if (-not $incompleteStagedFfmpegRejected) {
+        throw 'A staged package missing an FFmpeg runtime DLL was accepted.'
+    }
+
     $sentinel = Join-Path $outsideDirectory 'sentinel.txt'
     Set-Content -LiteralPath $sentinel -Value 'must survive' -NoNewline
     New-Item -ItemType Junction -Path $stagingDirectory -Target $outsideDirectory | Out-Null

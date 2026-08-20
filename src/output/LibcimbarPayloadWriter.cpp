@@ -18,14 +18,23 @@ PayloadWriter makeLibcimbarPayloadWriter() {
             return false;
         }
 
-        const size_t frameSize = ZSTD_findFrameCompressedSize(compressedBytes.data(), static_cast<size_t>(compressedBytes.size()));
-        if (ZSTD_isError(frameSize) || frameSize != static_cast<size_t>(compressedBytes.size())) {
-            if (error != nullptr) {
-                *error = ZSTD_isError(frameSize)
-                    ? QStringLiteral("Invalid compressed payload: %1").arg(QString::fromUtf8(ZSTD_getErrorName(frameSize)))
-                    : QStringLiteral("Compressed payload contains trailing or incomplete frame data");
+        const size_t payloadSize = static_cast<size_t>(compressedBytes.size());
+        size_t offset = 0;
+        while (offset < payloadSize) {
+            const size_t remaining = payloadSize - offset;
+            const size_t frameSize =
+                ZSTD_findFrameCompressedSize(compressedBytes.data() + offset, remaining);
+            if (ZSTD_isError(frameSize) || frameSize == 0 || frameSize > remaining) {
+                if (error != nullptr) {
+                    *error = ZSTD_isError(frameSize)
+                        ? QStringLiteral("Invalid compressed payload: %1")
+                              .arg(QString::fromUtf8(ZSTD_getErrorName(frameSize)))
+                        : QStringLiteral(
+                              "Compressed payload contains trailing or incomplete frame data");
+                }
+                return false;
             }
-            return false;
+            offset += frameSize;
         }
 
         const std::filesystem::path path(temporaryPath.toStdWString());

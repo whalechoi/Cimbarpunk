@@ -18,6 +18,7 @@ Linux Wayland 下的屏幕捕获通常由桌面门户/PipeWire、合成器授权
 
 - C++20、CMake 3.25+、Ninja。
 - Qt **6.8.4 exact**：Core、Gui、Widgets、Quick、Qml、Multimedia、Svg、Test；发布包必须包含 `iconengines/qsvgicon`。
+- Windows Qt Multimedia：动态 FFmpeg **7.1.1#6 exact**，仅启用 `avcodec`、`avformat`、`swresample`、`swscale`；这是 Qt 6.8.4 在 Windows 上提供 `QScreenCapture` 的必需后端。
 - `libcimbar`：`c509e0bb142bfd20e22583fb96f520e8083f3fba`。
 - vcpkg baseline：`9e593bb18ea69cc5095e012465dcd675a822ed0d`。
 - Windows：Visual Studio 2022 x64 C++ Build Tools 和 Windows SDK。
@@ -67,10 +68,12 @@ pwsh -File scripts/provision-qt-source-windows.ps1 `
   -Archive 'Q:\downloads\qt-everywhere-opensource-src-6.8.4.zip' `
   -SourceDirectory 'Q:\qt-everywhere-src-6.8.4' `
   -BuildDirectory 'Q:\qt-build-6.8.4' `
-  -InstallPrefix 'Q:\Qt\6.8.4\msvc2022_64'
+  -InstallPrefix 'Q:\Qt\6.8.4\msvc2022_64' `
+  -VcpkgRoot 'C:\src\vcpkg-cimbarpunk' `
+  -FfmpegInstallRoot 'Q:\ffmpeg-7.1.1'
 ```
 
-脚本校验 ZIP 后在 `SourceDirectory` 的同级临时目录自行解压，确认关键源码和许可证存在、写入绑定归档哈希的可信标记，再原子移动到目标。源码父目录必须位于所有 Git 工作树之外；构建时还设置 Git ceiling，防止 Qt SBOM 向上发现宿主仓库。脚本拒绝未带精确标记的已有源码、重解析源码，以及源码、构建、安装目录相同或互为祖先；构建完成后校验每份 Qt SPDX 的版本与来源，再把实际安装模块的完整 `LICENSES` 文本复制到 SDK。构建前应保证目标路径没有另一套不完整 Qt。
+脚本校验 ZIP 后在 `SourceDirectory` 的同级临时目录自行解压，确认关键源码和许可证存在、写入绑定归档哈希的可信标记，再原子移动到目标。源码父目录必须位于所有 Git 工作树之外；构建时还设置 Git ceiling，防止 Qt SBOM 向上发现宿主仓库。脚本拒绝未带精确标记的已有源码、重解析源码，以及源码、构建、安装、FFmpeg 目录相同或互为祖先。它先用仓库内固定清单和固定 vcpkg checkout 构建动态 FFmpeg 7.1.1#6，再强制以 `FEATURE_ffmpeg=ON` 重建 Qt；Release/Debug 插件、五个 FFmpeg DLL、许可证镜像或 SPDX 任一不完整都会使 provision 失败。构建前应保证目标路径没有另一套不完整 Qt。
 
 ```text
 <QtRoot>/bin/Qt6Core.dll
@@ -79,6 +82,9 @@ pwsh -File scripts/provision-qt-source-windows.ps1 `
 <QtRoot>/lib/cmake/Qt6Core/Qt6CoreTargets-debug.cmake
 <QtRoot>/plugins/iconengines/qsvgicon.dll
 <QtRoot>/plugins/iconengines/qsvgicond.dll
+<QtRoot>/plugins/multimedia/ffmpegmediaplugin.dll
+<QtRoot>/plugins/multimedia/ffmpegmediaplugind.dll
+<QtRoot>/bin/avcodec-61.dll
 ```
 
 Linux M1 只使用 Release 预设；`scripts/provision-qt-source-linux.sh ABSOLUTE_PREFIX ABSOLUTE_WORKDIR` 以可续传 `.part` 下载、校验后原子改名，并在临时目录完整解压后带完成标记原子移动源码，再构建同一官方源码的 Release 套件。脚本拒绝源码、构建、安装目录相同或祖先重叠；中断后只清理严格确认位于工作目录内的临时解压目标。若以后需要 `linux-debug`，应在独立前缀构建 Debug Qt，不要把不同 ABI 的库混入同一非多配置 Unix 前缀。
@@ -104,7 +110,7 @@ ctest --preset windows-debug --output-on-failure
 pwsh -File scripts/verify-windows.ps1 -QtRoot $qt -VcpkgRoot $vcpkg
 ```
 
-输出目录是 `out/install/windows-release`。验证脚本会以全新 CMake cache 重新配置、构建应用/测试/播放器、运行 CTest、安装，再调用 `windeployqt --release --qmldir src/selection/qml --include-plugins qsvgicon`，并检查 Qt Svg、`qsvgicon`、平台插件、传递 DLL和逐文件哈希一致的完整许可证材料。最后的有界启动会清除开发 Qt/QML 路径并验证关键模块来自暂存目录；脚本用强制终止收尾，这不等同于人工验证托盘“退出”菜单。
+输出目录是 `out/install/windows-release`。验证脚本会以全新 CMake cache 重新配置、构建应用/测试/播放器、运行 CTest、安装，再调用 `windeployqt --release --qmldir src/selection/qml --include-plugins qsvgicon`，并检查 Qt Svg、`qsvgicon`、平台插件、FFmpeg Multimedia 插件、五个 FFmpeg DLL、传递 DLL 和逐文件哈希一致的完整许可证材料。随后真实捕获探针会在暂存包 Qt/插件优先且开发 Qt/QML 路径已清理的环境中捕获一帧桌面，并核对已加载的 FFmpeg 插件确实来自暂存目录。最后的有界启动验证托盘应用没有主窗口且关键模块来自暂存目录；脚本用强制终止收尾，这不等同于人工验证托盘“退出”菜单。
 
 ## Linux 构建验证
 
