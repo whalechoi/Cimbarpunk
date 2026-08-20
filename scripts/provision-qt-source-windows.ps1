@@ -8,6 +8,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WindowsBuildHelpers.psm1') -Force
 $expectedSha256 = 'F56EA93356ECE3BCA727815233B86D9E1242D28D418074389FADCE683227C87C'
 
 function Test-SameOrAncestor([string]$CandidateParent, [string]$CandidateChild) {
@@ -33,10 +34,8 @@ if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
 if ((Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash -ne $expectedSha256) {
     throw 'Qt source archive SHA-256 mismatch.'
 }
-if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory 'configure.bat') -PathType Leaf)) {
-    throw "Extract the verified archive first; configure.bat is missing from $SourceDirectory"
-}
 
+$Archive = [IO.Path]::GetFullPath($Archive)
 $SourceDirectory = [IO.Path]::GetFullPath($SourceDirectory)
 $BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
 $InstallPrefix = [IO.Path]::GetFullPath($InstallPrefix)
@@ -48,6 +47,89 @@ foreach ($pair in @(
     if ((Test-SameOrAncestor $pair[1] $pair[3]) -or (Test-SameOrAncestor $pair[3] $pair[1])) {
         throw "$($pair[0]) and $($pair[2]) must be distinct, non-overlapping paths."
     }
+}
+
+$git = (Get-Command git.exe -ErrorAction Stop).Source
+$sourceParent = Split-Path -Parent $SourceDirectory
+New-Item -ItemType Directory -Path $sourceParent -Force | Out-Null
+$savedGitCeiling = [Environment]::GetEnvironmentVariable('GIT_CEILING_DIRECTORIES', 'Process')
+[Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $null, 'Process')
+try {
+    & $git -C $sourceParent rev-parse --is-inside-work-tree *> $null
+    if ($LASTEXITCODE -eq 0) {
+        throw "SourceDirectory must be outside every enclosing git worktree: $SourceDirectory"
+    }
+}
+finally {
+    [Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $savedGitCeiling, 'Process')
+}
+
+$sourceMarkerName = '.cimbarpunk-extraction-complete'
+$expectedMarker = "cimbarpunk-qt-source-v1`nsha256=$expectedSha256`n"
+$sourceMarker = Join-Path $SourceDirectory $sourceMarkerName
+if (Test-Path -LiteralPath $SourceDirectory) {
+    $sourceItem = Get-Item -LiteralPath $SourceDirectory -Force
+    if (-not $sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "SourceDirectory must be an ordinary directory: $SourceDirectory"
+    }
+    $hasSourceMarker = Test-Path -LiteralPath $sourceMarker -PathType Leaf
+    $hasExpectedMarker = $hasSourceMarker -and [IO.File]::ReadAllText($sourceMarker) -eq $expectedMarker
+    if (-not $hasExpectedMarker) {
+        throw "Existing Qt source lacks the trusted archive marker: $SourceDirectory"
+    }
+}
+else {
+    $temporaryExtraction = Join-Path $sourceParent ('.cimbarpunk-qt-extract-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $temporaryExtraction | Out-Null
+    try {
+        $tar = (Get-Command tar.exe -ErrorAction Stop).Source
+        & $tar -xf $Archive -C $temporaryExtraction
+        if ($LASTEXITCODE -ne 0) { throw 'Qt source archive extraction failed.' }
+        $extractedSource = Join-Path $temporaryExtraction 'qt-everywhere-src-6.8.4'
+        foreach ($requiredSource in @(
+            (Join-Path $extractedSource 'configure.bat'),
+            (Join-Path $extractedSource 'qtbase\LICENSES\LGPL-3.0-only.txt'),
+            (Join-Path $extractedSource 'qtdeclarative\LICENSES\LGPL-3.0-only.txt'),
+            (Join-Path $extractedSource 'qtmultimedia\LICENSES\LGPL-3.0-only.txt'),
+            (Join-Path $extractedSource 'qtsvg\LICENSES\LGPL-3.0-only.txt')
+        )) {
+            if (-not (Test-Path -LiteralPath $requiredSource -PathType Leaf)) {
+                throw "Incomplete Qt source archive extraction: $requiredSource"
+            }
+        }
+        [IO.File]::WriteAllText((Join-Path $extractedSource $sourceMarkerName), $expectedMarker)
+        [IO.Directory]::Move($extractedSource, $SourceDirectory)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryExtraction) {
+            $resolvedTemporary = [IO.Path]::GetFullPath($temporaryExtraction)
+            $temporaryLeaf = Split-Path -Leaf $resolvedTemporary
+            $isUnderSourceParent = $resolvedTemporary.StartsWith(
+                [IO.Path]::GetFullPath($sourceParent).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase
+            )
+            $hasExpectedTemporaryName = $temporaryLeaf.StartsWith('.cimbarpunk-qt-extract-')
+            $isExpectedTemporary = $isUnderSourceParent -and $hasExpectedTemporaryName
+            if (-not $isExpectedTemporary) {
+                throw "Refusing to clean unexpected extraction directory: $resolvedTemporary"
+            }
+            Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory 'configure.bat') -PathType Leaf)) {
+    throw "Verified Qt source is incomplete: $SourceDirectory"
+}
+[Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $sourceParent, 'Process')
+try {
+    & $git -C $SourceDirectory rev-parse --is-inside-work-tree *> $null
+    if ($LASTEXITCODE -eq 0) {
+        throw "Qt source can still discover an enclosing git repository: $SourceDirectory"
+    }
+}
+finally {
+    [Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $savedGitCeiling, 'Process')
 }
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -64,8 +146,12 @@ Write-Host "Using CMake: $cmake"
 Write-Host "Using Ninja: $ninja"
 New-Item -ItemType Directory -Path $BuildDirectory,$InstallPrefix -Force | Out-Null
 
-Push-Location $BuildDirectory
+[Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $sourceParent, 'Process')
+$locationPushed = $false
+$savedBuildPath = $env:PATH
 try {
+    Push-Location $BuildDirectory
+    $locationPushed = $true
     $configureArguments = @(
         '-prefix', $InstallPrefix,
         '-debug-and-release',
@@ -82,6 +168,13 @@ try {
     )
     & (Join-Path $SourceDirectory 'configure.bat') @configureArguments
     if ($LASTEXITCODE -ne 0) { throw 'Qt configure failed.' }
+
+    # Multi-config Debug host tools live in qtbase/bin/Debug but depend on
+    # Qt6Cored.dll in qtbase/bin.  CMake invokes the tools directly, so make
+    # the parent runtime directory explicit instead of relying on a developer
+    # Qt installation in PATH.
+    $qtBuildRuntime = Join-Path $BuildDirectory 'qtbase\bin'
+    $env:PATH = $qtBuildRuntime + [IO.Path]::PathSeparator + $savedBuildPath
     foreach ($configuration in @('Release', 'Debug')) {
         & $cmake --build . --config $configuration --parallel
         if ($LASTEXITCODE -ne 0) { throw "Qt $configuration build failed." }
@@ -90,7 +183,9 @@ try {
     }
 }
 finally {
-    Pop-Location
+    if ($locationPushed) { Pop-Location }
+    $env:PATH = $savedBuildPath
+    [Environment]::SetEnvironmentVariable('GIT_CEILING_DIRECTORIES', $savedGitCeiling, 'Process')
 }
 
 foreach ($required in @(
@@ -128,3 +223,4 @@ foreach ($sbom in $sbomFiles) {
     Get-ChildItem -LiteralPath $sourceLicenses -Force |
         Copy-Item -Destination $moduleDestination -Recurse -Force
 }
+Assert-CimbarpunkQtSbomCorpus -SbomRoot (Join-Path $InstallPrefix 'sbom')

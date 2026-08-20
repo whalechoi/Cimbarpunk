@@ -9,6 +9,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WindowsBuildHelpers.psm1') -Force
 
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
@@ -69,14 +70,8 @@ $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Pat
 $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source
 $ctest = Join-Path (Split-Path -Parent $cmake) 'ctest.exe'
 $installDirectory = Join-Path $repositoryRoot 'out\install\windows-release'
-$expectedInstallParent = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'out\install'))
 $resolvedInstall = [IO.Path]::GetFullPath($installDirectory)
-if (-not $resolvedInstall.StartsWith($expectedInstallParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to replace unexpected install directory: $resolvedInstall"
-}
-if (Test-Path -LiteralPath $resolvedInstall) {
-    Remove-Item -LiteralPath $resolvedInstall -Recurse -Force
-}
+Remove-CimbarpunkStagingDirectory -RepositoryRoot $repositoryRoot -StagingDirectory $resolvedInstall
 
 Push-Location $repositoryRoot
 try {
@@ -105,6 +100,8 @@ try {
         (Join-Path $resolvedInstall 'Qt6Svg.dll'),
         (Join-Path $resolvedInstall 'plugins\iconengines\qsvgicon.dll'),
         (Join-Path $resolvedInstall 'plugins\platforms\qwindows.dll'),
+        (Join-Path $resolvedInstall 'share\cimbarpunk\qml\SelectionOverlay.qml'),
+        (Join-Path $resolvedInstall 'share\icons\hicolor\scalable\apps\cimbarpunk.svg'),
         (Join-Path $resolvedInstall 'share\licenses\cimbarpunk\LICENSE'),
         (Join-Path $resolvedInstall 'share\licenses\cimbarpunk\THIRD_PARTY_NOTICES.md'),
         (Join-Path $resolvedInstall 'share\licenses\cimbarpunk\libcimbar-MPL-2.0.txt')
@@ -123,6 +120,7 @@ try {
     $licenseRoot = Join-Path $resolvedInstall 'share\licenses\cimbarpunk'
     Assert-MirroredFiles (Join-Path $QtRoot 'share\licenses\qt') (Join-Path $licenseRoot 'qt') @('*')
     Assert-MirroredFiles (Join-Path $QtRoot 'sbom') (Join-Path $licenseRoot 'qt-sbom') @('*.spdx')
+    Assert-CimbarpunkQtSbomCorpus -SbomRoot (Join-Path $licenseRoot 'qt-sbom')
     Assert-MirroredFiles (Join-Path $repositoryRoot 'out\build\windows-release\vcpkg_installed\x64-windows\share') (Join-Path $licenseRoot 'vcpkg') @('copyright')
     Assert-MirroredFiles (Join-Path $repositoryRoot 'external\libcimbar\src\third_party_lib') (Join-Path $licenseRoot 'libcimbar-vendored') @('LICENSE', 'LICENSE.*', 'COPYING', 'NOTICE*', 'base.hpp')
     $libcimbarHash = (Get-FileHash -LiteralPath (Join-Path $repositoryRoot 'external\libcimbar\LICENSE') -Algorithm SHA256).Hash

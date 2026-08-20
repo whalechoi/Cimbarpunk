@@ -53,7 +53,7 @@ done
 qtpaths="$CIMBARPUNK_QT_ROOT/bin/qtpaths"
 [[ -x $qtpaths ]] || qtpaths="$CIMBARPUNK_QT_ROOT/bin/qtpaths6"
 [[ -x $qtpaths ]] || { printf 'qtpaths was not found under %s/bin\n' "$CIMBARPUNK_QT_ROOT" >&2; exit 2; }
-qt_version=$($qtpaths --qt-version)
+qt_version=$("$qtpaths" --qt-version)
 [[ $qt_version == 6.8.4 ]] || { printf 'Exact Qt 6.8.4 required; found %s\n' "$qt_version" >&2; exit 2; }
 [[ -x $VCPKG_ROOT/vcpkg ]] || { printf 'vcpkg is not executable: %s/vcpkg\n' "$VCPKG_ROOT" >&2; exit 2; }
 

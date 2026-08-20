@@ -110,6 +110,7 @@ function Find-Pkgconf([string]$RepositoryRoot, [string]$SelectedPreset, [string]
 
 $QtRoot = Resolve-AbsoluteDirectory 'QtRoot' $QtRoot
 $VcpkgRoot = Resolve-AbsoluteDirectory 'VcpkgRoot' $VcpkgRoot
+Assert-CimbarpunkVcpkgCheckout -VcpkgRoot $VcpkgRoot
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 
 $qtConfig = Join-Path $QtRoot 'lib\cmake\Qt6\Qt6Config.cmake'
@@ -127,6 +128,7 @@ $qtVersion = (& $qtpaths --qt-version).Trim()
 if ($LASTEXITCODE -ne 0 -or $qtVersion -ne '6.8.4') {
     throw "QtRoot must contain exact Qt 6.8.4; found '$qtVersion'."
 }
+Assert-CimbarpunkQtSbomCorpus -SbomRoot (Join-Path $QtRoot 'sbom')
 foreach ($configuration in @('release', 'debug')) {
     $export = Join-Path $QtRoot "lib\cmake\Qt6Core\Qt6CoreTargets-$configuration.cmake"
     if (-not (Test-Path -LiteralPath $export -PathType Leaf)) {

@@ -175,6 +175,8 @@ if(WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tst_windows_build_helpers.ps1"
             -ModulePath "${PROJECT_SOURCE_DIR}/scripts/WindowsBuildHelpers.psm1"
             -ToolPath "${CMAKE_COMMAND}"
+            -VcpkgRoot "$ENV{VCPKG_ROOT}"
+            -WrongRepository "${PROJECT_SOURCE_DIR}"
     )
 endif()
 

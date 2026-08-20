@@ -21,7 +21,7 @@ Linux Wayland 下的屏幕捕获通常由桌面门户/PipeWire、合成器授权
 - `libcimbar`：`c509e0bb142bfd20e22583fb96f520e8083f3fba`。
 - vcpkg baseline：`9e593bb18ea69cc5095e012465dcd675a822ed0d`。
 - Windows：Visual Studio 2022 x64 C++ Build Tools 和 Windows SDK。
-- Linux：GCC、构建工具，以及 Qt 构建和运行时所需的 XCB/OpenGL 开发包与运行时包（下方列表同时包含两类，不能据此推断 GUI 已验证）。
+- Linux：GCC、构建工具，以及 M1 SSH/offscreen 验证所需的最小 Qt 构建依赖和运行时探针；这不是完整 XCB QPA GUI 开发环境，不能据此推断 Linux GUI 已验证。
 
 克隆后必须初始化固定子模块：
 
@@ -70,7 +70,7 @@ pwsh -File scripts/provision-qt-source-windows.ps1 `
   -InstallPrefix 'Q:\Qt\6.8.4\msvc2022_64'
 ```
 
-脚本要求 ZIP 已校验且已解压到 `SourceDirectory`；它不会删除或覆盖源码/构建目录，并拒绝源码、构建、安装目录相同或互为祖先。构建完成后会按 Qt SPDX 清单把实际安装模块的完整 `LICENSES` 文本复制到 SDK。构建前应保证目标路径没有另一套不完整 Qt。
+脚本校验 ZIP 后在 `SourceDirectory` 的同级临时目录自行解压，确认关键源码和许可证存在、写入绑定归档哈希的可信标记，再原子移动到目标。源码父目录必须位于所有 Git 工作树之外；构建时还设置 Git ceiling，防止 Qt SBOM 向上发现宿主仓库。脚本拒绝未带精确标记的已有源码、重解析源码，以及源码、构建、安装目录相同或互为祖先；构建完成后校验每份 Qt SPDX 的版本与来源，再把实际安装模块的完整 `LICENSES` 文本复制到 SDK。构建前应保证目标路径没有另一套不完整 Qt。
 
 ```text
 <QtRoot>/bin/Qt6Core.dll
@@ -108,7 +108,7 @@ pwsh -File scripts/verify-windows.ps1 -QtRoot $qt -VcpkgRoot $vcpkg
 
 ## Linux 构建验证
 
-Ubuntu 构建主机需要：
+Ubuntu M1 SSH/offscreen 构建主机的最小依赖如下；其中 XCB 包仅用于运行时探针，并非完整的 XCB QPA GUI 开发依赖。Linux GUI 尚未验证：
 
 ```bash
 sudo apt-get update
