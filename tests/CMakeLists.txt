@@ -103,6 +103,25 @@ if(WIN32)
     )
 endif()
 
+if(UNIX AND NOT APPLE)
+    qt_add_executable(tst_linux_screen_capture integration/tst_linux_screen_capture.cpp)
+    target_link_libraries(tst_linux_screen_capture PRIVATE
+        cimbarpunk_core
+        cimbarpunk_selection
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Multimedia
+        Qt6::Test
+        Qt6::Widgets
+    )
+
+    add_test(NAME linux_screen_capture COMMAND tst_linux_screen_capture)
+    set_tests_properties(linux_screen_capture PROPERTIES
+        LABELS linux_gui
+        TIMEOUT 60
+    )
+endif()
+
 qt_add_executable(tst_selection_overlay_controller unit/tst_selection_overlay_controller.cpp)
 target_link_libraries(tst_selection_overlay_controller PRIVATE
     cimbarpunk_core
@@ -184,6 +203,9 @@ set_tests_properties(session PROPERTIES
 add_custom_target(cimbarpunk_tests DEPENDS tst_version tst_contracts tst_selection_model tst_settings_store tst_rotating_logger tst_output_store tst_latest_frame_mailbox tst_frame_pipeline tst_decode_worker tst_qt_screen_capture_source tst_selection_overlay_controller tst_tray_controller tst_app_runtime tst_decoder tst_session)
 if(WIN32)
     add_dependencies(cimbarpunk_tests tst_windows_screen_capture)
+endif()
+if(UNIX AND NOT APPLE)
+    add_dependencies(cimbarpunk_tests tst_linux_screen_capture)
 endif()
 
 add_subdirectory(manual/frame_player)

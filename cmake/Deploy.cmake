@@ -31,7 +31,7 @@ function(cimbarpunk_configure_deploy target)
     else()
         install(TARGETS ${target}
             BUNDLE DESTINATION .
-            RUNTIME DESTINATION .
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         )
     endif()
 

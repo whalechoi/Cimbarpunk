@@ -142,6 +142,22 @@ qt_version=$("$install_prefix/bin/qtpaths" --qt-version)
 test -f "$install_prefix/lib/cmake/Qt6Svg/Qt6SvgConfig.cmake"
 test -f "$install_prefix/plugins/iconengines/libqsvgicon.so"
 
+required_gui_plugins=(
+    "$install_prefix/plugins/platforms/libqxcb.so"
+    "$install_prefix/plugins/multimedia/libffmpegmediaplugin.so"
+)
+for plugin in "${required_gui_plugins[@]}"; do
+    if [[ ! -f $plugin ]]; then
+        printf 'Required Linux GUI plugin is missing: %s\n' "$plugin" >&2
+        exit 1
+    fi
+    missing=$(ldd "$plugin" | awk '/not found/ { print }')
+    if [[ -n $missing ]]; then
+        printf 'Unresolved dependencies for %s:\n%s\n' "$plugin" "$missing" >&2
+        exit 1
+    fi
+done
+
 qt_license_root=$install_prefix/share/licenses/qt
 mkdir -p "$qt_license_root/qt-distribution"
 cp -a -- "$source_directory/LICENSES/." "$qt_license_root/qt-distribution/"

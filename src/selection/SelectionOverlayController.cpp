@@ -12,17 +12,28 @@
 #include <algorithm>
 #include <cmath>
 
+static void initializeSelectionOverlayResource() {
+    Q_INIT_RESOURCE(selection_overlay_qml);
+}
+
 namespace cimbarpunk {
 
 SelectionOverlayController::SelectionOverlayController(QObject* parent)
     : QObject(parent)
     , m_model()
     , m_view(std::make_unique<QQuickView>()) {
-    Q_INIT_RESOURCE(selection_overlay_qml);
+    initializeSelectionOverlayResource();
 
     m_view->setColor(Qt::transparent);
     m_view->setResizeMode(QQuickView::SizeRootObjectToView);
-    m_view->setFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    Qt::WindowFlags overlayFlags =
+        Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint;
+    if (QGuiApplication::platformName() == QStringLiteral("xcb")) {
+        // X11 window managers may constrain tool windows to the desktop work area,
+        // which would offset the model's screen-relative capture coordinates.
+        overlayFlags |= Qt::X11BypassWindowManagerHint;
+    }
+    m_view->setFlags(overlayFlags);
     m_view->setInitialProperties(
         {{QStringLiteral("selectionModel"), QVariant::fromValue(&m_model)}});
     m_view->setSource(QUrl(QStringLiteral("qrc:/cimbarpunk/qml/SelectionOverlay.qml")));

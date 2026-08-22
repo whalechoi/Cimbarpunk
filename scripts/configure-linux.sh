@@ -26,6 +26,8 @@ required_files=(
     "$CIMBARPUNK_QT_ROOT/lib/cmake/Qt6/Qt6Config.cmake"
     "$CIMBARPUNK_QT_ROOT/lib/cmake/Qt6Svg/Qt6SvgConfig.cmake"
     "$CIMBARPUNK_QT_ROOT/plugins/iconengines/libqsvgicon.so"
+    "$CIMBARPUNK_QT_ROOT/plugins/platforms/libqxcb.so"
+    "$CIMBARPUNK_QT_ROOT/plugins/multimedia/libffmpegmediaplugin.so"
     "$VCPKG_ROOT/vcpkg"
 )
 for required in "${required_files[@]}"; do

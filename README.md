@@ -9,10 +9,10 @@ Cimbarpunk 是一个常驻系统托盘的桌面 cimbar 解码客户端。它不�
 | 平台 | M1 状态 | 边界 |
 |---|---|---|
 | Windows 10/11 x64 | 完整构建、自动测试、部署与有限人工启动验证 | 主要支持平台；需要桌面捕获与系统托盘权限 |
-| Linux x64 | 仅 SSH 构建和 `offscreen` 自动测试 | 未运行托盘、覆盖层或桌面捕获；不宣称 Linux GUI 可用 |
+| Linux x64 | Ubuntu 24.04.4 上已完成 Release 构建、自动测试、XCB GUI 与夹具端到端解码 | 仅覆盖 Xfce/X11/Xvfb 虚拟显示；未验证 Wayland、物理显示器、其他桌面环境或 XRDP 登录会话 |
 | macOS | 未构建、未测试 | 当前不宣称支持 |
 
-Linux Wayland 下的屏幕捕获通常由桌面门户/PipeWire、合成器授权和会话实现共同决定。当前实现尚未接入或验证 Wayland portal 的交互流程，因此即使构建通过，也不能据此推断 GUI 捕获可用。
+Linux 验证记录见 [2026-08-23 Linux GUI 最终验证](docs/verification/2026-08-23-linux-gui.md)。Wayland 下的屏幕捕获通常由桌面门户/PipeWire、合成器授权和会话实现共同决定；当前实现尚未接入或验证 Wayland portal 的交互流程，不能从 X11 结果推断 Wayland 可用。
 
 ## 固定工具链与依赖
 
@@ -22,7 +22,7 @@ Linux Wayland 下的屏幕捕获通常由桌面门户/PipeWire、合成器授权
 - `libcimbar`：`c509e0bb142bfd20e22583fb96f520e8083f3fba`。
 - vcpkg baseline：`9e593bb18ea69cc5095e012465dcd675a822ed0d`。
 - Windows：Visual Studio 2022 x64 C++ Build Tools 和 Windows SDK。
-- Linux：GCC、构建工具，以及 M1 SSH/offscreen 验证所需的最小 Qt 构建依赖和运行时探针；这不是完整 XCB QPA GUI 开发环境，不能据此推断 Linux GUI 已验证。
+- Linux：GCC、完整 XCB/X11 Qt 构建依赖、Xfce 会话、Xvfb、会话 D-Bus 与 GUI 自动化探针；Qt Multimedia 使用 Ubuntu 提供的动态 FFmpeg 6.1.1。Windows 的 FFmpeg 7.1.1#6 固定要求不适用于 Linux。
 
 克隆后必须初始化固定子模块：
 
@@ -87,7 +87,7 @@ pwsh -File scripts/provision-qt-source-windows.ps1 `
 <QtRoot>/bin/avcodec-61.dll
 ```
 
-Linux M1 只使用 Release 预设；`scripts/provision-qt-source-linux.sh ABSOLUTE_PREFIX ABSOLUTE_WORKDIR` 以可续传 `.part` 下载、校验后原子改名，并在临时目录完整解压后带完成标记原子移动源码，再构建同一官方源码的 Release 套件。脚本拒绝源码、构建、安装目录相同或祖先重叠；中断后只清理严格确认位于工作目录内的临时解压目标。若以后需要 `linux-debug`，应在独立前缀构建 Debug Qt，不要把不同 ABI 的库混入同一非多配置 Unix 前缀。
+Linux M1 只使用 Release 预设；`scripts/provision-qt-source-linux.sh ABSOLUTE_PREFIX ABSOLUTE_WORKDIR` 以可续传 `.part` 下载、校验后原子改名，并在临时目录完整解压后带完成标记原子移动源码，再构建同一官方源码的 Release 套件。脚本拒绝源码、构建、安装目录相同或祖先重叠；中断后只清理严格确认位于工作目录内的临时解压目标。完成后还会验证 XCB、SVG 图标和 FFmpeg Multimedia 插件存在且 `ldd` 无未解析依赖。若以后需要 `linux-debug`，应在独立前缀构建 Debug Qt，不要把不同 ABI 的库混入同一非多配置 Unix 前缀。
 
 ## Windows 构建与验证
 
@@ -114,17 +114,33 @@ pwsh -File scripts/verify-windows.ps1 -QtRoot $qt -VcpkgRoot $vcpkg
 
 ## Linux 构建验证
 
-Ubuntu M1 SSH/offscreen 构建主机的最小依赖如下；其中 XCB 包仅用于运行时探针，并非完整的 XCB QPA GUI 开发依赖。Linux GUI 尚未验证：
+已验证的 Ubuntu 24.04.4 构建和 X11 GUI 依赖如下。前两行是构建工具与 Qt 源码构建依赖，后两行提供 Xfce/Xvfb 会话、托盘、会话 D-Bus 和验证探针；`xrdp`/`xorgxrdp` 便于远程桌面接入，但本次端到端结论来自 Xvfb 会话，并未验证实际 RDP 登录：
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential cmake ninja-build curl git pkg-config python3-venv \
-  p7zip-full zip unzip libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 \
-  libxcb-cursor0 libxcb-xinerama0 libxcb-keysyms1 libxcb-image0 \
-  libxcb-render-util0 libxcb-icccm4
+  p7zip-full zip unzip bison autoconf autoconf-archive automake libtool ffmpeg \
+  libgl1-mesa-dev libglu1-mesa-dev libfontconfig1-dev libfreetype-dev xorg-dev \
+  libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+  libxinerama-dev libxcursor-dev libxkbcommon-dev libxkbcommon-x11-dev \
+  libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-icccm4-dev \
+  libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
+  libxcb-render0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev \
+  libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xinput-dev \
+  libxcb-xkb-dev \
+  xfce4 xfce4-goodies xvfb dbus-x11 x11-utils xdotool imagemagick scrot wmctrl \
+  xrdp xorgxrdp
 ```
 
-在用户目录安装 Qt 源码套件和固定 vcpkg 后运行：
+首次构建 Qt 时，在用户目录准备独立的安装前缀和工作目录：
+
+```bash
+export CIMBARPUNK_QT_ROOT=/home/whale/.local/share/cimbarpunk/Qt/6.8.4/gcc_64
+./scripts/provision-qt-source-linux.sh \
+  "$CIMBARPUNK_QT_ROOT" /home/whale/.cache/cimbarpunk-qt-6.8.4
+```
+
+安装固定 vcpkg 后，先运行不依赖真实桌面的完整构建、非 GUI 测试与部署检查：
 
 ```bash
 export CIMBARPUNK_QT_ROOT=/home/whale/.local/share/cimbarpunk/Qt/6.8.4/gcc_64
@@ -132,7 +148,19 @@ export VCPKG_ROOT=/home/whale/.local/share/cimbarpunk/vcpkg
 ./scripts/verify-linux.sh
 ```
 
-脚本要求两个变量均为已存在的绝对路径，配置当前 `linux-release` preset，构建应用、测试和手动播放器，并以 `QT_QPA_PLATFORM=offscreen`、`QT_QUICK_BACKEND=software` 运行非 GUI 测试。它不会启动托盘、选择覆盖层或桌面捕获。
+该脚本要求两个变量均为已存在的绝对路径，以 `cmake --fresh` 配置 `linux-release` preset，构建应用、测试和手动播放器，以 `offscreen`/software 运行除 `linux_gui` 标签外的 CTest，再安全重建精确的 `out/install/linux-release` 并安装。它还验证已安装应用、`qt.conf`、XCB/SVG/FFmpeg 插件、QML 和 `ldd` 依赖闭包，并逐文件比较项目、Qt、SPDX、vcpkg 与 libcimbar 源许可证语料和安装语料。
+
+随后在已启动系统托盘并具有可访问 `DISPLAY` 和会话 D-Bus 的 X11/Xfce 会话中运行：
+
+```bash
+export CIMBARPUNK_QT_ROOT=/home/whale/.local/share/cimbarpunk/Qt/6.8.4/gcc_64
+export VCPKG_ROOT=/home/whale/.local/share/cimbarpunk/vcpkg
+test -n "$DISPLAY"
+test -n "$DBUS_SESSION_BUS_ADDRESS"
+bash ./scripts/verify-linux-gui.sh
+```
+
+GUI 脚本强制使用 `xcb` 和 software Qt Quick，给 GUI CTest 设置进程级超时，并验证系统托盘、覆盖层的原生 X11 全屏位置、Qt 原生屏幕帧和生产捕获源。已安装托盘应用会在清除开发 Qt 的库、插件和 QML 环境后有界启动，并核对 XCB 插件来自安装包。完整端到端验证还应从真实托盘菜单开始，完成创建、移动与边角调整选区，播放 `tests/fixtures/cimbar`，核对解码文件 SHA-256、无遗留 `.part` 文件，并从托盘菜单退出；本次实测命令、结果和边界记录在上述日期化文档中。
 
 ## CMake presets
 
@@ -153,7 +181,7 @@ export VCPKG_ROOT=/home/whale/.local/share/cimbarpunk/vcpkg
 
 日志位于 Qt `AppLocalDataLocation` 下的 `cimbarpunk.log`，最多约 1 MiB，并保留 `.1`～`.3`。日志只记录状态、尺寸和像素格式等诊断，不写入截图像素或解码内容。
 
-Windows 首次捕获若失败，请检查“设置 → 隐私和安全性 → 屏幕截图和应用录制”以及系统托盘可用性。Linux 构建通过不代表已经取得 X11/Wayland 捕获权限。
+Windows 首次捕获若失败，请检查“设置 → 隐私和安全性 → 屏幕截图和应用录制”以及系统托盘可用性。Linux 上应分别检查 `DISPLAY`、会话 D-Bus、系统托盘、XCB/FFmpeg 插件和桌面捕获权限；X11 验证结果不代表 Wayland 已获授权或可用。
 
 ## 手动夹具播放器
 
