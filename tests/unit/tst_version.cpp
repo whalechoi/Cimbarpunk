@@ -8,7 +8,7 @@ class VersionTest final : public QObject {
 
 private slots:
     void exposesPinnedApplicationVersion() {
-        QCOMPARE(cimbarpunk::versionString(), std::string_view{"0.1.0"});
+        QCOMPARE(cimbarpunk::versionString(), std::string_view{"1.0.0"});
     }
 };
 
