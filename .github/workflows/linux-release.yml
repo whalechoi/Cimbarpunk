@@ -1,0 +1,65 @@
+name: Linux release build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      CIMBARPUNK_QT_ROOT: /home/runner/cimbarpunk-sdk/Qt-6.8.4
+      VCPKG_ROOT: /home/runner/cimbarpunk-sdk/vcpkg
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      VCPKG_MAX_CONCURRENCY: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl git python3-venv \
+            p7zip-full zip unzip bison autoconf automake autoconf-archive libtool pkg-config \
+            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libfontconfig1-dev libfreetype-dev xorg-dev \
+            libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxinerama-dev libxcursor-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-icccm4-dev \
+            libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev \
+            libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xinput-dev libxcb-xkb-dev
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: qt-cache
+        with:
+          path: /home/runner/cimbarpunk-sdk/Qt-6.8.4
+          key: ubuntu-24.04-qt-6.8.4-${{ hashFiles('scripts/provision-qt-source-linux.sh') }}-v1
+      - name: Build exact Qt SDK
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: bash scripts/provision-qt-source-linux.sh "$CIMBARPUNK_QT_ROOT" /home/runner/cimbarpunk-qt-build
+      - name: Prepare fixed vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" checkout --detach 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+      - name: Build and check non-GUI deployment
+        run: bash scripts/verify-linux.sh
+      - name: Package Linux binary
+        run: |
+          version=$(sed -n 's/^project(Cimbarpunk VERSION \([^ ]*\).*/\1/p' CMakeLists.txt)
+          test "$version" = 1.0.1
+          mkdir -p packages
+          tar -czf "packages/Cimbarpunk-$version-linux-x64.tar.gz" \
+            --transform="s,^linux-release,Cimbarpunk-$version-linux-x64," \
+            -C out/install linux-release
+          sha256sum packages/*.tar.gz > packages/linux-SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_SHA" > packages/linux-source-commit.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-release
+          path: packages/*
+          if-no-files-found: error

@@ -19,7 +19,7 @@ Linux 验证记录见 [2026-08-23 Linux GUI 最终验证](docs/verification/2026
 - C++20、CMake 3.25+、Ninja。
 - Qt **6.8.4 exact**：Core、Gui、Widgets、Quick、Qml、Multimedia、Svg、Test；发布包必须包含 `iconengines/qsvgicon`。
 - Windows Qt Multimedia：动态 FFmpeg **7.1.1#6 exact**，仅启用 `avcodec`、`avformat`、`swresample`、`swscale`；这是 Qt 6.8.4 在 Windows 上提供 `QScreenCapture` 的必需后端。
-- `libcimbar`：`c509e0bb142bfd20e22583fb96f520e8083f3fba`。
+- `libcimbar`：`bfb0c8e471820ae493cd3694ea6bed5d5ac06c37`。
 - vcpkg baseline：`9e593bb18ea69cc5095e012465dcd675a822ed0d`。
 - Windows：Visual Studio 2022 x64 C++ Build Tools 和 Windows SDK。
 - Linux：GCC、完整 XCB/X11 Qt 构建依赖、Xfce 会话、Xvfb、会话 D-Bus 与 GUI 自动化探针；Qt Multimedia 使用 Ubuntu 提供的动态 FFmpeg 6.1.1。Windows 的 FFmpeg 7.1.1#6 固定要求不适用于 Linux。

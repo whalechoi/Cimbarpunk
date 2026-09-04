@@ -32,7 +32,7 @@
 - Qt 必须是精确版本 6.8.4，并同时提供 Windows Release/Debug exports、Qt Svg、`qsvgicon/qsvgicond` 和 Multimedia FFmpeg 插件。
 - Windows Qt Multimedia 使用动态 FFmpeg 7.1.1#6；不得静默切换到 Windows Media Foundation 或其他未验证后端。
 - vcpkg checkout 固定为 `9e593bb18ea69cc5095e012465dcd675a822ed0d`。
-- `libcimbar` 子模块固定为 `c509e0bb142bfd20e22583fb96f520e8083f3fba`，嵌套 samples 子模块也必须初始化。
+- `libcimbar` 子模块固定为 `bfb0c8e471820ae493cd3694ea6bed5d5ac06c37`，嵌套 samples 子模块也必须初始化。
 - 不浮动依赖版本，不替换固定源码、哈希或 triplet，除非用户明确批准并同步更新验证与许可证材料。
 - 当前 Windows 本机 Qt 根目录是 `D:\Softwares\cqp-684\Qt`，vcpkg 根目录是 `D:\Projects\Cimbarpunk\.deps\vcpkg`。这些是本机环境路径，不得硬编码进产品源码。
 
