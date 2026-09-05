@@ -58,8 +58,10 @@ jobs:
         with:
           path: ~/.cache/vcpkg/archives
           key: ubuntu-24.04-vcpkg-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # vcpkg validates each cached package's ABI, including after app version bumps.
           restore-keys: |
             ubuntu-24.04-vcpkg-${{ hashFiles('vcpkg.json') }}-
+            ubuntu-24.04-vcpkg-
       - name: Build and check non-GUI deployment
         id: native-build
         run: bash scripts/verify-linux.sh
