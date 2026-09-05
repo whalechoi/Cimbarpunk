@@ -120,6 +120,7 @@ pwsh -File scripts/verify-windows.ps1 -QtRoot $qt -VcpkgRoot $vcpkg
 sudo apt-get update
 sudo apt-get install -y build-essential cmake ninja-build curl git pkg-config python3-venv \
   p7zip-full zip unzip bison autoconf autoconf-archive automake libtool ffmpeg \
+  libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev libpulse-dev \
   libgl1-mesa-dev libglu1-mesa-dev libfontconfig1-dev libfreetype-dev xorg-dev \
   libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
   libxinerama-dev libxcursor-dev libxkbcommon-dev libxkbcommon-x11-dev \

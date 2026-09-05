@@ -133,7 +133,7 @@ cd "$build_directory"
     -opensource -confirm-license \
     -nomake examples -nomake tests \
     -submodules qtbase,qtdeclarative,qtmultimedia,qtsvg,qttools \
-    -- -G Ninja
+    -- -G Ninja -DFEATURE_ffmpeg=ON
 cmake --build . --parallel
 cmake --install .
 

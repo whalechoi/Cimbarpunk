@@ -26,7 +26,7 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build curl git python3-venv \
             libclang-18-dev llvm-18-dev \
             p7zip-full zip unzip bison autoconf automake autoconf-archive libtool pkg-config \
-            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev libpulse-dev \
             libgl1-mesa-dev libglu1-mesa-dev libfontconfig1-dev libfreetype-dev xorg-dev \
             libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
             libxinerama-dev libxcursor-dev libxkbcommon-dev libxkbcommon-x11-dev \
@@ -34,7 +34,7 @@ jobs:
             libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
             libxcb-render0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev \
             libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xinput-dev libxcb-xkb-dev
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         id: qt-cache
         with:
           path: /home/runner/cimbarpunk-sdk/Qt-6.8.4
@@ -42,6 +42,12 @@ jobs:
       - name: Build exact Qt SDK
         if: steps.qt-cache.outputs.cache-hit != 'true'
         run: bash scripts/provision-qt-source-linux.sh "$CIMBARPUNK_QT_ROOT" /home/runner/cimbarpunk-qt-build
+      - name: Save completed Qt SDK
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: /home/runner/cimbarpunk-sdk/Qt-6.8.4
+          key: ubuntu-24.04-qt-6.8.4-${{ hashFiles('scripts/provision-qt-source-linux.sh') }}-v1
       - name: Prepare fixed vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
